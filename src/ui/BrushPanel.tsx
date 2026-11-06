@@ -1,4 +1,4 @@
-import type { GuideType } from '../engine/types';
+import type { GuideType, TouchMode } from '../engine/types';
 import { getEngine } from '../engineRef';
 import { useUI } from '../store';
 
@@ -13,6 +13,8 @@ export function BrushPanel() {
   const toggleGuide = useUI((s) => s.toggleGuide);
   const mirror = useUI((s) => s.mirror);
   const toggleMirror = useUI((s) => s.toggleMirror);
+  const touchMode = useUI((s) => s.touchMode);
+  const setTouchMode = useUI((s) => s.setTouchMode);
   const showToast = useUI((s) => s.showToast);
 
   return (
@@ -87,6 +89,16 @@ export function BrushPanel() {
       </div>
 
       <div className="group">
+        <h3>Input</h3>
+        <label>Finger touch</label>
+        <select value={touchMode} onChange={(e) => setTouchMode(e.target.value as TouchMode)}>
+          <option value="auto">Auto (orbit once stylus seen)</option>
+          <option value="orbit">Always orbit</option>
+          <option value="draw">Always draw</option>
+        </select>
+      </div>
+
+      <div className="group">
         <h3>Project</h3>
         <div className="row">
           <button
@@ -102,7 +114,7 @@ export function BrushPanel() {
       </div>
 
       <div className="note">
-        Build 0.3 · Tablet-first prototype
+        Build 0.4 · Tablet-first prototype
         <br />
         Pressure uses Pointer Events. Stylus pressure depends on browser, device and pen support.
         This build is a web prototype, not a native APK.

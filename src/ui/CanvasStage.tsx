@@ -21,6 +21,7 @@ export function CanvasStage() {
       engine.setTool(s.tool);
       engine.setBrush(s.brush);
       engine.setMirror(s.mirror);
+      engine.setTouchMode(s.touchMode);
       engine.setGuide(s.guide);
       engine.setGridVisible(s.gridVisible);
       engine.setGuideVisible(s.guideVisible);
@@ -44,7 +45,7 @@ export function CanvasStage() {
       <div id="toast" style={{ opacity: toastVisible ? 1 : 0 }}>
         {toastText}
       </div>
-      <div className="hint">Stylus pressure supported where available · Orbit mode to navigate</div>
+      <div className="hint">Stylus draws · fingers orbit, pan & pinch-zoom once a stylus is detected</div>
     </main>
   );
 }
