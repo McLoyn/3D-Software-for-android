@@ -15,6 +15,8 @@ export function BrushPanel() {
   const toggleMirror = useUI((s) => s.toggleMirror);
   const touchMode = useUI((s) => s.touchMode);
   const setTouchMode = useUI((s) => s.setTouchMode);
+  const inputDebug = useUI((s) => s.inputDebug);
+  const setInputDebug = useUI((s) => s.setInputDebug);
   const showToast = useUI((s) => s.showToast);
 
   return (
@@ -96,6 +98,13 @@ export function BrushPanel() {
           <option value="orbit">Always orbit</option>
           <option value="draw">Always draw</option>
         </select>
+        <button
+          className={inputDebug ? 'active' : ''}
+          style={{ width: '100%', marginTop: 8 }}
+          onClick={() => setInputDebug(!inputDebug)}
+        >
+          Input debug: {inputDebug ? 'On' : 'Off'}
+        </button>
       </div>
 
       <div className="group">
@@ -114,7 +123,7 @@ export function BrushPanel() {
       </div>
 
       <div className="note">
-        Build 0.4 · Tablet-first prototype
+        Build 0.5 · Tablet-first prototype
         <br />
         Pressure uses Pointer Events. Stylus pressure depends on browser, device and pen support.
         This build is a web prototype, not a native APK.

@@ -14,6 +14,7 @@ export function CanvasStage() {
 
     const engine = new Engine(canvas, stage);
     engine.onChange = (info) => useUI.getState().setHistory(info);
+    engine.onInput = (info) => useUI.getState().setInput(info);
     setEngine(engine);
 
     // Store UI -> engine. Setter engine bersifat idempoten, jadi aman dipanggil setiap perubahan.
@@ -22,6 +23,7 @@ export function CanvasStage() {
       engine.setBrush(s.brush);
       engine.setMirror(s.mirror);
       engine.setTouchMode(s.touchMode);
+      engine.setInputDebug(s.inputDebug);
       engine.setGuide(s.guide);
       engine.setGridVisible(s.gridVisible);
       engine.setGuideVisible(s.guideVisible);
@@ -38,6 +40,8 @@ export function CanvasStage() {
 
   const toastText = useUI((s) => s.toastText);
   const toastVisible = useUI((s) => s.toastVisible);
+  const inputDebug = useUI((s) => s.inputDebug);
+  const input = useUI((s) => s.input);
 
   return (
     <main id="stage" ref={stageRef}>
@@ -45,6 +49,28 @@ export function CanvasStage() {
       <div id="toast" style={{ opacity: toastVisible ? 1 : 0 }}>
         {toastText}
       </div>
+      {inputDebug && (
+        <div className="debug">
+          {input ? (
+            <>
+              <div>
+                {input.pointerType || '—'} · pressure {input.pressure.toFixed(2)}
+                {input.inContact ? ' · touching' : ''}
+              </div>
+              <div>
+                last contact {input.min.toFixed(2)}–{input.max.toFixed(2)}
+              </div>
+              <div>
+                {input.max - input.min >= 0.04
+                  ? 'pressure varies → hardware pressure in use'
+                  : 'no pressure variation → speed simulation in use'}
+              </div>
+            </>
+          ) : (
+            <div>Touch the canvas with the stylus…</div>
+          )}
+        </div>
+      )}
       <div className="hint">Stylus draws · fingers orbit, pan & pinch-zoom once a stylus is detected</div>
     </main>
   );

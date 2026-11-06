@@ -23,7 +23,7 @@ export function Header() {
   const onExport = () => {
     const engine = getEngine();
     if (!engine) return;
-    downloadUrl(engine.exportPNG(), 'feather-android-build-04.png');
+    downloadUrl(engine.exportPNG(), 'feather-android-build-05.png');
     showToast('PNG exported');
   };
 
@@ -45,7 +45,7 @@ export function Header() {
     <header>
       <div className="brand">
         <b>✦</b> Feather{' '}
-        <span style={{ color: '#777d8e', fontWeight: 500 }}>Android · 0.4</span>
+        <span style={{ color: '#777d8e', fontWeight: 500 }}>Android · 0.5</span>
       </div>
       <div className="spacer" />
       <button disabled={!canUndo} onClick={() => getEngine()?.undo()} title="Undo">
