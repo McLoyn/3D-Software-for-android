@@ -15,6 +15,7 @@ import {
   type ProjectFile,
   type StrokeData,
   type ToolId,
+  type TouchMode,
   type Vec3Tuple,
 } from './types';
 
@@ -52,6 +53,9 @@ export class Engine {
   private tool: ToolId = 'draw';
   private brush: BrushSettings = { ...DEFAULT_BRUSH };
   private mirror = false;
+  private touchMode: TouchMode = 'auto';
+  /** True setelah ada event dari stylus; dipakai mode 'auto' untuk mengalihkan jari ke navigasi. */
+  private penSeen = false;
 
   private drawing = false;
   private activePointerId = -1;
@@ -97,6 +101,9 @@ export class Engine {
 
     this.history.onChange = () => this.emit();
 
+    // Fase capture di stage berjalan SEBELUM listener OrbitControls di canvas,
+    // sehingga kita bisa menentukan apakah pointer ini boleh menavigasi kamera.
+    stage.addEventListener('pointerdown', this.onPointerDownCapture, true);
     canvas.addEventListener('pointerdown', this.onPointerDown);
     canvas.addEventListener('pointermove', this.onPointerMove);
     canvas.addEventListener('pointerup', this.onPointerEnd);
@@ -114,7 +121,10 @@ export class Engine {
 
   setTool(tool: ToolId): void {
     this.tool = tool;
-    if (!this.drawing) this.controls.enabled = tool === 'orbit';
+  }
+
+  setTouchMode(mode: TouchMode): void {
+    this.touchMode = mode;
   }
 
   setBrush(brush: BrushSettings): void {
@@ -189,6 +199,7 @@ export class Engine {
   dispose(): void {
     cancelAnimationFrame(this.frame);
     this.resizeObserver.disconnect();
+    this.stage.removeEventListener('pointerdown', this.onPointerDownCapture, true);
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     this.canvas.removeEventListener('pointermove', this.onPointerMove);
     this.canvas.removeEventListener('pointerup', this.onPointerEnd);
@@ -204,9 +215,31 @@ export class Engine {
 
   // ------------------------------------------------------------------- input
 
+  /** Apa yang dilakukan sebuah pointer: menavigasi kamera, menggambar, atau menghapus. */
+  private modeFor(e: PointerEvent): 'navigate' | 'draw' | 'erase' {
+    const tool = this.tool;
+    if (tool === 'orbit') return 'navigate';
+    // Tombol kanan/tengah mouse selalu untuk navigasi (pan/zoom), apa pun tool-nya.
+    if (e.pointerType === 'mouse' && e.button !== 0) return 'navigate';
+    if (e.pointerType === 'touch') {
+      const fingerFollowsTool =
+        this.touchMode === 'draw' || (this.touchMode === 'auto' && !this.penSeen);
+      if (!fingerFollowsTool) return 'navigate';
+    }
+    return tool;
+  }
+
+  private readonly onPointerDownCapture = (e: PointerEvent): void => {
+    if (e.pointerType === 'pen') this.penSeen = true;
+    // Saat goresan sedang dibuat, semua pointer lain (mis. telapak tangan) tidak boleh menggerakkan kamera.
+    this.controls.enabled = !this.drawing && this.modeFor(e) === 'navigate';
+  };
+
   private readonly onPointerDown = (e: PointerEvent): void => {
-    if (this.tool === 'orbit' || this.drawing) return;
-    if (this.tool === 'erase') {
+    if (this.drawing) return;
+    const mode = this.modeFor(e);
+    if (mode === 'navigate') return;
+    if (mode === 'erase') {
       this.eraseAt(e);
       return;
     }
@@ -253,7 +286,8 @@ export class Engine {
     if (!this.drawing || e.pointerId !== this.activePointerId) return;
 
     this.drawing = false;
-    this.controls.enabled = this.tool === 'orbit';
+    // Diam: kontrol aktif lagi (agar zoom roda mouse tetap jalan); keputusan per-pointer ada di onPointerDownCapture.
+    this.controls.enabled = true;
     try {
       this.canvas.releasePointerCapture(e.pointerId);
     } catch {

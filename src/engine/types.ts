@@ -1,6 +1,14 @@
 export type ToolId = 'draw' | 'erase' | 'orbit';
 export type GuideType = 'plane' | 'sphere' | 'cube';
 
+/**
+ * Perilaku sentuhan jari.
+ * - auto: jari menggambar sampai stylus terdeteksi, setelah itu jari hanya navigasi (palm rejection)
+ * - orbit: jari selalu navigasi (orbit/pan/zoom)
+ * - draw: jari selalu mengikuti tool aktif
+ */
+export type TouchMode = 'auto' | 'orbit' | 'draw';
+
 export type Vec3Tuple = [number, number, number];
 
 /** Pengaturan kuas seperti yang tampil di UI (nilai slider). */
