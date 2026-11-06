@@ -43,6 +43,18 @@ export interface StrokeData {
   opacity: number;
   /** Apakah goresan ini dicerminkan pada sumbu X. */
   mirror: boolean;
+  /** Waktu tiap titik dalam ms sejak titik pertama. Dipakai untuk simulasi tekanan dari kecepatan. */
+  times?: number[];
+}
+
+/** Ringkasan input terakhir, untuk indikator debug. */
+export interface InputInfo {
+  pointerType: string;
+  pressure: number;
+  /** Rentang tekanan selama kontak terakhir. */
+  min: number;
+  max: number;
+  inContact: boolean;
 }
 
 export interface HistoryInfo {
@@ -52,7 +64,7 @@ export interface HistoryInfo {
 }
 
 export const PROJECT_FORMAT = 'feather-android-prototype' as const;
-export const PROJECT_VERSION = '0.3';
+export const PROJECT_VERSION = '0.5';
 
 export interface ProjectFile {
   format: typeof PROJECT_FORMAT;

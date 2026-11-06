@@ -12,6 +12,7 @@ import {
   type BrushSettings,
   type GuideType,
   type HistoryInfo,
+  type InputInfo,
   type ProjectFile,
   type StrokeData,
   type ToolId,
@@ -33,6 +34,8 @@ const toTuple = (v: THREE.Vector3): Vec3Tuple => [v.x, v.y, v.z];
 export class Engine {
   /** Dipanggil setiap jumlah goresan atau status undo/redo berubah. */
   onChange?: (info: HistoryInfo) => void;
+  /** Dipanggil (dibatasi ~15x/detik) saat indikator input debug aktif. */
+  onInput?: (info: InputInfo) => void;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly stage: HTMLElement;
@@ -62,7 +65,15 @@ export class Engine {
   private draftPoints: Vec3Tuple[] = [];
   private draftPressures: number[] = [];
   private draftStyle: StrokeStyle | null = null;
+  private draftTimes: number[] = [];
+  private draftStartTime = 0;
   private nextId = 1;
+
+  private inputDebug = false;
+  private contactActive = false;
+  private contactMin = 0;
+  private contactMax = 0;
+  private lastInputEmit = 0;
   private frame = 0;
 
   constructor(canvas: HTMLCanvasElement, stage: HTMLElement) {
@@ -125,6 +136,10 @@ export class Engine {
 
   setTouchMode(mode: TouchMode): void {
     this.touchMode = mode;
+  }
+
+  setInputDebug(on: boolean): void {
+    this.inputDebug = on;
   }
 
   setBrush(brush: BrushSettings): void {
@@ -211,6 +226,7 @@ export class Engine {
     (this.grid.material as THREE.Material).dispose();
     this.renderer.dispose();
     this.onChange = undefined;
+    this.onInput = undefined;
   }
 
   // ------------------------------------------------------------------- input
@@ -231,6 +247,7 @@ export class Engine {
 
   private readonly onPointerDownCapture = (e: PointerEvent): void => {
     if (e.pointerType === 'pen') this.penSeen = true;
+    this.reportInput(e, true);
     // Saat goresan sedang dibuat, semua pointer lain (mis. telapak tangan) tidak boleh menggerakkan kamera.
     this.controls.enabled = !this.drawing && this.modeFor(e) === 'navigate';
   };
@@ -261,28 +278,80 @@ export class Engine {
     };
     this.draftPoints = [toTuple(start)];
     this.draftPressures = [this.pressureOf(e)];
+    this.draftStartTime = e.timeStamp;
+    this.draftTimes = [0];
   };
 
   private readonly onPointerMove = (e: PointerEvent): void => {
+    this.reportInput(e, false);
     if (!this.drawing || e.pointerId !== this.activePointerId || !this.draftStyle) return;
 
-    const point = this.hitPoint(e);
-    if (!point) return;
+    // Chrome menggabungkan beberapa sampel stylus ke satu event; ambil semuanya agar garis dan
+    // kurva tekanan lebih halus.
+    const coalesced = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+    const samples = coalesced.length > 0 ? coalesced : [e];
 
-    const last = this.draftPoints[this.draftPoints.length - 1];
-    const distance = Math.hypot(point.x - last[0], point.y - last[1], point.z - last[2]);
-    if (distance < MIN_POINT_DISTANCE) return;
+    let added = false;
+    for (const sample of samples) {
+      if (this.addSample(sample)) added = true;
+    }
+    if (!added) return;
 
-    this.draftPoints.push(toTuple(point));
-    this.draftPressures.push(this.pressureOf(e));
     this.layer.setPreview({
       ...this.draftStyle,
       points: this.draftPoints,
       pressures: this.draftPressures,
+      times: this.draftTimes,
     });
   };
 
+  private addSample(e: PointerEvent): boolean {
+    const point = this.hitPoint(e);
+    if (!point) return false;
+
+    const last = this.draftPoints[this.draftPoints.length - 1];
+    const distance = Math.hypot(point.x - last[0], point.y - last[1], point.z - last[2]);
+    if (distance < MIN_POINT_DISTANCE) return false;
+
+    this.draftPoints.push(toTuple(point));
+    this.draftPressures.push(this.pressureOf(e));
+    this.draftTimes.push(e.timeStamp - this.draftStartTime);
+    return true;
+  }
+
+  /** Mengirim ringkasan input ke indikator debug (hanya saat diaktifkan). */
+  private reportInput(e: PointerEvent, force: boolean): void {
+    if (!this.inputDebug || !this.onInput) return;
+
+    const inContact = e.pressure > 0 && e.type !== 'pointerup' && e.type !== 'pointercancel';
+    if (inContact) {
+      if (!this.contactActive) {
+        this.contactActive = true;
+        this.contactMin = e.pressure;
+        this.contactMax = e.pressure;
+      } else {
+        this.contactMin = Math.min(this.contactMin, e.pressure);
+        this.contactMax = Math.max(this.contactMax, e.pressure);
+      }
+    } else {
+      force = force || this.contactActive;
+      this.contactActive = false;
+    }
+
+    const now = performance.now();
+    if (!force && now - this.lastInputEmit < 66) return;
+    this.lastInputEmit = now;
+    this.onInput({
+      pointerType: e.pointerType,
+      pressure: e.pressure,
+      min: this.contactMin,
+      max: this.contactMax,
+      inContact,
+    });
+  }
+
   private readonly onPointerEnd = (e: PointerEvent): void => {
+    this.reportInput(e, true);
     if (!this.drawing || e.pointerId !== this.activePointerId) return;
 
     this.drawing = false;
@@ -301,12 +370,14 @@ export class Engine {
         id: this.nextId++,
         points: this.draftPoints,
         pressures: this.draftPressures,
+        times: this.draftTimes,
       };
       this.history.execute(new AddStrokeCommand(this.layer, stroke));
     }
 
     this.draftPoints = [];
     this.draftPressures = [];
+    this.draftTimes = [];
     this.draftStyle = null;
   };
 

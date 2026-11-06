@@ -43,9 +43,16 @@ export function parseProject(raw: unknown): ParsedProject {
         ? rawPressures
         : points.map(() => 0.5);
 
+    const rawTimes = s.times;
+    const times: number[] | undefined =
+      Array.isArray(rawTimes) && rawTimes.length === points.length && rawTimes.every(isNum)
+        ? rawTimes
+        : undefined;
+
     strokes.push({
       points,
       pressures,
+      times,
       color: typeof s.color === 'string' ? s.color : DEFAULT_BRUSH.color,
       radius: isNum(s.radius) ? s.radius : DEFAULT_BRUSH.radius / 1000,
       pressureResponse: isNum(s.pressureResponse) ? s.pressureResponse : DEFAULT_BRUSH.pressure / 100,
