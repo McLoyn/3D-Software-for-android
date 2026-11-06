@@ -1,8 +1,9 @@
-# Feather Android · Build 0.5
+# Feather Android · Build 0.6
 
 Klona Feather 3D untuk Android (target: PocoPad). Build 0.3 memigrasikan prototipe satu file HTML
 ke **React + TypeScript + Vite** dengan inti 3D yang terpisah dari UI. Build 0.4 menambahkan
-pemisahan input stylus dan jari.
+pemisahan input stylus dan jari, Build 0.5 tebal goresan per titik tekanan, dan Build 0.6 tampilan
+yang meniru Feather asli.
 
 ## Menjalankan
 
@@ -34,7 +35,7 @@ src/
     project.ts       # parsing berkas proyek (.fthr.json), kompatibel dengan 0.2
     types.ts
   ui/                # React, hanya untuk antarmuka
-    Header.tsx  Toolbar.tsx  BrushPanel.tsx  CanvasStage.tsx  StatusBar.tsx
+    Header.tsx  Toolbar.tsx  GuideBar.tsx  BrushPanel.tsx  CanvasStage.tsx  StatusBar.tsx
   store.ts           # state UI (Zustand): tool, kuas, mirror, guide, riwayat
   engineRef.ts       # akses ke instance Engine dari komponen
 ```
@@ -57,6 +58,18 @@ Keputusan dibuat per pointer di `Engine.modeFor()`, dievaluasi sebelum OrbitCont
 
 Catatan: pengenalan telapak tangan di level OS/browser tetap berlaku di atas ini, dan perilaku stylus
 (tekanan, jenis pointer) bergantung pada perangkat. Perlu diuji langsung di PocoPad.
+
+## Tampilan (Build 0.6)
+
+Mengikuti video referensi Feather asli:
+
+- Kanvas terang seperti kertas dengan grid halus. Goresan berupa tinta **datar tanpa kilau**
+  (`MeshBasicMaterial`). Kuas bawaan: hitam dan tipis (ukuran 12).
+- UI berupa panel melayang di atas kanvas layar penuh. Kiri: alat, warna, ukuran, dan opasitas
+  (slider vertikal). Kanan atas: guide, mirror, dan tombol Settings. Kiri atas: undo/redo dan Open/Save/PNG.
+- Pengaturan lanjutan (pressure response, visibilitas grid/guide, input jari, Input debug, Clear, Reset view)
+  ada di lembar **Settings** yang bisa dibuka di layar sekecil apa pun. Sebelumnya panel kanan hilang di bawah 760px.
+- Belum ada: bayangan jatuh dan permukaan terisi seperti di Feather asli.
 
 ## Tekanan dan bentuk goresan (Build 0.5)
 
@@ -84,6 +97,7 @@ Perilaku gambar sama. Perubahan yang ikut terjadi karena arsitektur baru:
 
 ## Yang belum dikerjakan
 
-- Panel pengaturan untuk layar kecil/ponsel (saat ini disembunyikan di bawah 760px).
+- Bayangan jatuh dan permukaan terisi (fill) seperti di Feather asli.
+- Pipet warna, preset kuas, dan palet warna.
 - Eraser belum menghapus saat digeser, hanya saat diketuk.
 - Bungkus jadi APK dengan Capacitor.
