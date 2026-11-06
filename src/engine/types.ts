@@ -64,7 +64,7 @@ export interface HistoryInfo {
 }
 
 export const PROJECT_FORMAT = 'feather-android-prototype' as const;
-export const PROJECT_VERSION = '0.6';
+export const PROJECT_VERSION = '0.7';
 
 export interface ProjectFile {
   format: typeof PROJECT_FORMAT;

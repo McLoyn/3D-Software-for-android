@@ -75,6 +75,8 @@ export class Engine {
   private contactMax = 0;
   private lastInputEmit = 0;
   private frame = 0;
+  private needsRender = true;
+  private previewDirty = false;
 
   constructor(canvas: HTMLCanvasElement, stage: HTMLElement) {
     this.canvas = canvas;
@@ -84,7 +86,6 @@ export class Engine {
       canvas,
       antialias: true,
       alpha: true,
-      preserveDrawingBuffer: true,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -151,15 +152,21 @@ export class Engine {
   }
 
   setGuide(type: GuideType): void {
+    if (type === this.guides.type) return;
     this.guides.setType(type);
+    this.invalidate();
   }
-
+  
   setGridVisible(visible: boolean): void {
+    if (this.grid.visible === visible) return;
     this.grid.visible = visible;
+    this.invalidate();
   }
-
+  
   setGuideVisible(visible: boolean): void {
+    if (this.guides.root.visible === visible) return;
     this.guides.setVisible(visible);
+    this.invalidate();
   }
 
   // ----------------------------------------------------------------- actions
@@ -297,13 +304,8 @@ export class Engine {
     }
     if (!added) return;
 
-    this.layer.setPreview({
-      ...this.draftStyle,
-      points: this.draftPoints,
-      pressures: this.draftPressures,
-      times: this.draftTimes,
-    });
-  };
+    if (!added) return;
+    this.previewDirty = true;
 
   private addSample(e: PointerEvent): boolean {
     const point = this.hitPoint(e);
@@ -362,7 +364,7 @@ export class Engine {
     } catch {
       // pointer capture sudah dilepas oleh browser
     }
-
+    this.previewDirty = false;
     this.layer.clearPreview();
     if (this.draftStyle && this.draftPoints.length > 1) {
       const stroke: StrokeData = {
@@ -398,8 +400,8 @@ export class Engine {
 
   private hitPoint(e: PointerEvent): THREE.Vector3 | null {
     this.setRay(e);
-    const onGuide = this.guides.intersect(this.raycaster);
-    if (onGuide) return onGuide.point;
+    // Guide aktif: hanya permukaan guide. Meleset = abaikan sampel, jangan lompat ke bidang XY.
+    if (this.guides.active) return this.guides.intersect(this.raycaster)?.point ?? null;
     return this.raycaster.ray.intersectPlane(this.drawPlane, new THREE.Vector3());
   }
 
@@ -407,7 +409,13 @@ export class Engine {
     return e.pressure > 0 ? e.pressure : 0.5;
   }
 
+  
+
   // ---------------------------------------------------------------- internals
+  
+  private invalidate(): void {
+    this.needsRender = true;
+  }
 
   private stageSize(): { width: number; height: number } {
     return {
@@ -432,8 +440,20 @@ export class Engine {
   }
 
   private readonly loop = (): void => {
-    this.frame = requestAnimationFrame(this.loop);
-    this.controls.update();
+  this.frame = requestAnimationFrame(this.loop);
+  const moved = this.controls.update(); // true saat kamera bergerak (termasuk damping)
+  if (this.previewDirty && this.draftStyle) {
+    this.previewDirty = false;
+    this.layer.setPreview({
+      ...this.draftStyle,
+      points: this.draftPoints,
+      pressures: this.draftPressures,
+      times: this.draftTimes,
+    });
+    this.needsRender = true;
+  }
+  if (moved || this.needsRender) {
+    this.needsRender = false;
     this.renderer.render(this.scene, this.camera);
-  };
-}
+  }
+};
