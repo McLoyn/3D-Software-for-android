@@ -23,7 +23,7 @@ export function Header() {
   const onExport = () => {
     const engine = getEngine();
     if (!engine) return;
-    downloadUrl(engine.exportPNG(), 'feather-android-build-05.png');
+    downloadUrl(engine.exportPNG(), 'feather-android-build-06.png');
     showToast('PNG exported');
   };
 
@@ -42,18 +42,18 @@ export function Header() {
   };
 
   return (
-    <header>
+    <header className="pill top-left">
       <div className="brand">
-        <b>✦</b> Feather{' '}
-        <span style={{ color: '#777d8e', fontWeight: 500 }}>Android · 0.5</span>
+        <b>✦</b>
+        <small>Android · 0.6</small>
       </div>
-      <div className="spacer" />
       <button disabled={!canUndo} onClick={() => getEngine()?.undo()} title="Undo">
         ↶
       </button>
       <button disabled={!canRedo} onClick={() => getEngine()?.redo()} title="Redo">
         ↷
       </button>
+      <div className="vdivider" />
       <button onClick={() => fileRef.current?.click()}>Open</button>
       <button onClick={onSave}>Save</button>
       <button onClick={onExport}>PNG</button>

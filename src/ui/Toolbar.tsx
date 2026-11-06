@@ -1,4 +1,4 @@
-import type { GuideType, ToolId } from '../engine/types';
+import type { ToolId } from '../engine/types';
 import { useUI } from '../store';
 
 const TOOLS: { id: ToolId; icon: string; title: string }[] = [
@@ -7,27 +7,20 @@ const TOOLS: { id: ToolId; icon: string; title: string }[] = [
   { id: 'orbit', icon: '◉', title: 'Orbit' },
 ];
 
-const GUIDES: { id: GuideType; icon: string; title: string }[] = [
-  { id: 'sphere', icon: '◯', title: 'Sphere guide' },
-  { id: 'cube', icon: '▣', title: 'Cube guide' },
-  { id: 'plane', icon: '▤', title: 'Plane guide' },
-];
-
+/** Panel alat di kiri: alat, warna, ukuran, dan opasitas kuas. */
 export function Toolbar() {
   const tool = useUI((s) => s.tool);
-  const guide = useUI((s) => s.guide);
-  const mirror = useUI((s) => s.mirror);
+  const brush = useUI((s) => s.brush);
   const setTool = useUI((s) => s.setTool);
-  const setGuide = useUI((s) => s.setGuide);
-  const toggleMirror = useUI((s) => s.toggleMirror);
+  const setBrush = useUI((s) => s.setBrush);
   const showToast = useUI((s) => s.showToast);
 
   return (
-    <nav>
+    <nav className="pill col left-tools">
       {TOOLS.map((t) => (
         <button
           key={t.id}
-          className={tool === t.id ? 'active' : ''}
+          className={`tool-btn${tool === t.id ? ' active' : ''}`}
           title={t.title}
           onClick={() => {
             setTool(t.id);
@@ -38,19 +31,33 @@ export function Toolbar() {
         </button>
       ))}
       <div className="divider" />
-      {GUIDES.map((g) => (
-        <button
-          key={g.id}
-          className={guide === g.id ? 'active' : ''}
-          title={g.title}
-          onClick={() => setGuide(g.id)}
-        >
-          {g.icon}
-        </button>
-      ))}
-      <button className={mirror ? 'active' : ''} title="Mirror" onClick={toggleMirror}>
-        ⇋
-      </button>
+      <label className="swatch" title="Color" style={{ background: brush.color }}>
+        <input
+          type="color"
+          value={brush.color}
+          onChange={(e) => setBrush({ color: e.target.value })}
+        />
+      </label>
+      <div className="vslider" title="Size">
+        <input
+          type="range"
+          min={5}
+          max={100}
+          value={brush.radius}
+          onChange={(e) => setBrush({ radius: Number(e.target.value) })}
+        />
+        <span>{brush.radius}</span>
+      </div>
+      <div className="vslider" title="Opacity">
+        <input
+          type="range"
+          min={10}
+          max={100}
+          value={brush.opacity}
+          onChange={(e) => setBrush({ opacity: Number(e.target.value) })}
+        />
+        <span>{brush.opacity}%</span>
+      </div>
     </nav>
   );
 }

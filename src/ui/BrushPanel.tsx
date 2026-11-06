@@ -1,44 +1,36 @@
-import type { GuideType, TouchMode } from '../engine/types';
+import type { TouchMode } from '../engine/types';
 import { getEngine } from '../engineRef';
 import { useUI } from '../store';
 
+/** Lembar pengaturan lanjutan, dibuka dari tombol roda gigi di kanan atas. */
 export function BrushPanel() {
+  const settingsOpen = useUI((s) => s.settingsOpen);
+  const toggleSettings = useUI((s) => s.toggleSettings);
   const brush = useUI((s) => s.brush);
   const setBrush = useUI((s) => s.setBrush);
-  const guide = useUI((s) => s.guide);
-  const setGuide = useUI((s) => s.setGuide);
   const gridVisible = useUI((s) => s.gridVisible);
   const guideVisible = useUI((s) => s.guideVisible);
   const toggleGrid = useUI((s) => s.toggleGrid);
   const toggleGuide = useUI((s) => s.toggleGuide);
-  const mirror = useUI((s) => s.mirror);
-  const toggleMirror = useUI((s) => s.toggleMirror);
   const touchMode = useUI((s) => s.touchMode);
   const setTouchMode = useUI((s) => s.setTouchMode);
   const inputDebug = useUI((s) => s.inputDebug);
   const setInputDebug = useUI((s) => s.setInputDebug);
   const showToast = useUI((s) => s.showToast);
 
+  if (!settingsOpen) return null;
+
   return (
-    <aside>
+    <aside className="sheet">
+      <div className="sheet-head">
+        <span>Settings</span>
+        <button onClick={toggleSettings} title="Close">
+          ✕
+        </button>
+      </div>
+
       <div className="group">
         <h3>3D Brush</h3>
-        <label>Color</label>
-        <input
-          type="color"
-          value={brush.color}
-          onChange={(e) => setBrush({ color: e.target.value })}
-        />
-        <label>
-          Radius <span>{(brush.radius / 1000).toFixed(3)}</span>
-        </label>
-        <input
-          type="range"
-          min={5}
-          max={100}
-          value={brush.radius}
-          onChange={(e) => setBrush({ radius: Number(e.target.value) })}
-        />
         <label>
           Pressure response <span>{brush.pressure}%</span>
         </label>
@@ -49,25 +41,10 @@ export function BrushPanel() {
           value={brush.pressure}
           onChange={(e) => setBrush({ pressure: Number(e.target.value) })}
         />
-        <label>
-          Opacity <span>{brush.opacity}%</span>
-        </label>
-        <input
-          type="range"
-          min={10}
-          max={100}
-          value={brush.opacity}
-          onChange={(e) => setBrush({ opacity: Number(e.target.value) })}
-        />
       </div>
 
       <div className="group">
         <h3>Surface</h3>
-        <select value={guide} onChange={(e) => setGuide(e.target.value as GuideType)}>
-          <option value="plane">Plane</option>
-          <option value="sphere">Sphere guide</option>
-          <option value="cube">Cube guide</option>
-        </select>
         <label>Guide visibility</label>
         <div className="row">
           <button className={gridVisible ? 'active' : ''} onClick={toggleGrid}>
@@ -77,17 +54,6 @@ export function BrushPanel() {
             Guide
           </button>
         </div>
-      </div>
-
-      <div className="group">
-        <h3>Symmetry</h3>
-        <button
-          className={mirror ? 'active' : ''}
-          style={{ width: '100%' }}
-          onClick={toggleMirror}
-        >
-          Live mirror: {mirror ? 'On' : 'Off'}
-        </button>
       </div>
 
       <div className="group">
@@ -123,7 +89,7 @@ export function BrushPanel() {
       </div>
 
       <div className="note">
-        Build 0.5 · Tablet-first prototype
+        Build 0.6 · Tablet-first prototype
         <br />
         Pressure uses Pointer Events. Stylus pressure depends on browser, device and pen support.
         This build is a web prototype, not a native APK.
