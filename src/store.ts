@@ -14,6 +14,7 @@ export interface UIState {
   brush: BrushSettings;
   mirror: boolean;
   touchMode: TouchMode;
+  settingsOpen: boolean;
   inputDebug: boolean;
   input: InputInfo | null;
   guide: GuideType;
@@ -25,6 +26,7 @@ export interface UIState {
 
   setTool: (tool: ToolId) => void;
   setTouchMode: (mode: TouchMode) => void;
+  toggleSettings: () => void;
   setInputDebug: (on: boolean) => void;
   setInput: (info: InputInfo) => void;
   setBrush: (patch: Partial<BrushSettings>) => void;
@@ -43,6 +45,7 @@ export const useUI = create<UIState>((set) => ({
   brush: { ...DEFAULT_BRUSH },
   mirror: false,
   touchMode: 'auto',
+  settingsOpen: false,
   inputDebug: false,
   input: null,
   guide: 'plane',
@@ -54,6 +57,7 @@ export const useUI = create<UIState>((set) => ({
 
   setTool: (tool) => set({ tool }),
   setTouchMode: (touchMode) => set({ touchMode }),
+  toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
   setInputDebug: (inputDebug) => set({ inputDebug, input: null }),
   setInput: (input) => set({ input }),
   setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
