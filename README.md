@@ -1,7 +1,8 @@
-# Feather Android · Build 0.3
+# Feather Android · Build 0.4
 
-Klona Feather 3D untuk Android (target: PocoPad). Build 0.3 adalah migrasi dari prototipe satu file HTML
-ke **React + TypeScript + Vite**, dengan inti 3D yang terpisah dari UI.
+Klona Feather 3D untuk Android (target: PocoPad). Build 0.3 memigrasikan prototipe satu file HTML
+ke **React + TypeScript + Vite** dengan inti 3D yang terpisah dari UI. Build 0.4 menambahkan
+pemisahan input stylus dan jari.
 
 ## Menjalankan
 
@@ -42,6 +43,21 @@ Aliran data: UI mengubah store → `CanvasStage` menyalin store ke engine (sette
 engine memancarkan `onChange` (jumlah goresan, can undo/redo) kembali ke store.
 Instance `Engine` tidak pernah masuk ke state React.
 
+## Input stylus dan jari (Build 0.4)
+
+Keputusan dibuat per pointer di `Engine.modeFor()`, dievaluasi sebelum OrbitControls menerima event:
+
+- **Stylus (`pen`)**: mengikuti tool aktif (gambar / hapus / orbit).
+- **Jari (`touch`)**: diatur oleh pengaturan *Finger touch* di panel Input.
+  - *Auto* (default): jari menggambar sampai stylus pertama kali terdeteksi, setelah itu jari hanya
+    navigasi (1 jari orbit, 2 jari pan + pinch zoom). Ini juga menjaga HP tanpa stylus tetap bisa menggambar.
+  - *Always orbit* / *Always draw*: memaksa salah satunya.
+- **Mouse**: tombol kiri mengikuti tool; tombol kanan = pan, tombol tengah/roda = zoom, pada tool apa pun.
+- Saat goresan sedang dibuat, pointer lain (misalnya telapak tangan) tidak menggerakkan kamera dan tidak memulai goresan baru.
+
+Catatan: pengenalan telapak tangan di level OS/browser tetap berlaku di atas ini, dan perilaku stylus
+(tekanan, jenis pointer) bergantung pada perangkat. Perlu diuji langsung di PocoPad.
+
 ## Beda dengan Build 0.2
 
 Perilaku gambar sama. Perubahan yang ikut terjadi karena arsitektur baru:
@@ -57,7 +73,6 @@ Perilaku gambar sama. Perubahan yang ikut terjadi karena arsitektur baru:
 ## Yang belum dikerjakan
 
 - Ketebalan masih memakai rata-rata tekanan per goresan (belum per titik).
-- Jari = orbit, stylus = gambar (palm rejection).
 - Panel pengaturan untuk layar kecil/ponsel (saat ini disembunyikan di bawah 760px).
 - Eraser belum menghapus saat digeser, hanya saat diketuk.
 - Bungkus jadi APK dengan Capacitor.
