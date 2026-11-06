@@ -182,12 +182,14 @@ export class Engine {
   clearStrokes(): void {
     this.layer.clear();
     this.history.clear();
+    this.invalidate();
   }
 
   resetView(): void {
     this.camera.position.set(4.8, 3.8, 6.8);
     this.controls.target.set(0, 0, 0);
     this.controls.update();
+    this.invalidate();
   }
 
   exportPNG(): string {
@@ -215,6 +217,7 @@ export class Engine {
       this.layer.add({ ...stroke, id: this.nextId++ });
     }
     this.history.clear();
+    this.invalidate();
     return { guide: parsed.guide, count: parsed.strokes.length };
   }
 
@@ -303,10 +306,8 @@ export class Engine {
       if (this.addSample(sample)) added = true;
     }
     if (!added) return;
-
-    if (!added) return;
     this.previewDirty = true;
-  }
+  };
 
   private addSample(e: PointerEvent): boolean {
     const point = this.hitPoint(e);
@@ -367,6 +368,7 @@ export class Engine {
     }
     this.previewDirty = false;
     this.layer.clearPreview();
+    this.invalidate();
     if (this.draftStyle && this.draftPoints.length > 1) {
       const stroke: StrokeData = {
         ...this.draftStyle,
@@ -430,9 +432,11 @@ export class Engine {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.invalidate();
   }
 
   private emit(): void {
+    this.invalidate();
     this.onChange?.({
       strokeCount: this.layer.count,
       canUndo: this.history.canUndo,
