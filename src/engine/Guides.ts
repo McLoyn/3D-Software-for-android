@@ -82,3 +82,7 @@ export class Guides {
     this.surface = null;
   }
 }
+
+get active(): boolean {
+  return this.surface !== null && this.root.visible;
+}
