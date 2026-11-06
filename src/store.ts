@@ -5,12 +5,14 @@ import {
   type GuideType,
   type HistoryInfo,
   type ToolId,
+  type TouchMode,
 } from './engine/types';
 
 export interface UIState {
   tool: ToolId;
   brush: BrushSettings;
   mirror: boolean;
+  touchMode: TouchMode;
   guide: GuideType;
   gridVisible: boolean;
   guideVisible: boolean;
@@ -19,6 +21,7 @@ export interface UIState {
   toastVisible: boolean;
 
   setTool: (tool: ToolId) => void;
+  setTouchMode: (mode: TouchMode) => void;
   setBrush: (patch: Partial<BrushSettings>) => void;
   toggleMirror: () => void;
   setGuide: (guide: GuideType) => void;
@@ -34,6 +37,7 @@ export const useUI = create<UIState>((set) => ({
   tool: 'draw',
   brush: { ...DEFAULT_BRUSH },
   mirror: false,
+  touchMode: 'auto',
   guide: 'plane',
   gridVisible: true,
   guideVisible: true,
@@ -42,6 +46,7 @@ export const useUI = create<UIState>((set) => ({
   toastVisible: false,
 
   setTool: (tool) => set({ tool }),
+  setTouchMode: (touchMode) => set({ touchMode }),
   setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
   toggleMirror: () => set((s) => ({ mirror: !s.mirror })),
   setGuide: (guide) => set({ guide }),
