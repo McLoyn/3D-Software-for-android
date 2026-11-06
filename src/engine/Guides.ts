@@ -16,6 +16,10 @@ export class Guides {
     return this.current;
   }
 
+  get active(): boolean {
+    return this.surface !== null && this.root.visible;
+  }
+
   setType(type: GuideType): void {
     if (type === this.current) return;
     this.clear();
@@ -83,6 +87,4 @@ export class Guides {
   }
 }
 
-  get active(): boolean {
-    return this.surface !== null && this.root.visible;
-  }
+  

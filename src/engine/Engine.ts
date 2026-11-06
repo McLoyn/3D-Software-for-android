@@ -307,7 +307,7 @@ export class Engine {
     if (!added) return;
     this.previewDirty = true;
   }
-  
+
   private addSample(e: PointerEvent): boolean {
     const point = this.hitPoint(e);
     if (!point) return false;
@@ -458,3 +458,4 @@ export class Engine {
     this.renderer.render(this.scene, this.camera);
   }
 };
+}
