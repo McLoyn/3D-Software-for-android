@@ -1,4 +1,4 @@
-# Feather Android · Build 0.4
+# Feather Android · Build 0.5
 
 Klona Feather 3D untuk Android (target: PocoPad). Build 0.3 memigrasikan prototipe satu file HTML
 ke **React + TypeScript + Vite** dengan inti 3D yang terpisah dari UI. Build 0.4 menambahkan
@@ -58,6 +58,18 @@ Keputusan dibuat per pointer di `Engine.modeFor()`, dievaluasi sebelum OrbitCont
 Catatan: pengenalan telapak tangan di level OS/browser tetap berlaku di atas ini, dan perilaku stylus
 (tekanan, jenis pointer) bergantung pada perangkat. Perlu diuji langsung di PocoPad.
 
+## Tekanan dan bentuk goresan (Build 0.5)
+
+- Tebal goresan kini mengikuti tekanan **per titik** (tabung radius variabel, `StrokeBuilder.ts`),
+  dengan ujung awal dan akhir yang meruncing.
+- Sampel stylus yang digabung Chrome diambil semua (`getCoalescedEvents`), jadi garis dan kurva tekanan lebih halus.
+- Jika stylus tidak mengirim variasi tekanan (selisih < 0.04 dalam satu goresan), tebal garis **disimulasikan dari
+  kecepatan**: pelan = tebal, cepat = tipis. Berlaku juga untuk mouse dan jari. Waktu tiap titik disimpan di berkas proyek.
+- **Input debug** (panel Input): menampilkan jenis pointer, tekanan saat ini, dan rentang tekanan kontak terakhir
+  untuk memastikan apakah perangkat benar-benar mengirim tekanan.
+- Konstanta yang bisa disetel di `StrokeBuilder.ts`: `TAPER_MAX_LENGTH`, `TAPER_MIN_SCALE`, `PRESSURE_RANGE_EPS`,
+  dan rumus `speedPressures`.
+
 ## Beda dengan Build 0.2
 
 Perilaku gambar sama. Perubahan yang ikut terjadi karena arsitektur baru:
@@ -72,7 +84,6 @@ Perilaku gambar sama. Perubahan yang ikut terjadi karena arsitektur baru:
 
 ## Yang belum dikerjakan
 
-- Ketebalan masih memakai rata-rata tekanan per goresan (belum per titik).
 - Panel pengaturan untuk layar kecil/ponsel (saat ini disembunyikan di bawah 760px).
 - Eraser belum menghapus saat digeser, hanya saat diketuk.
 - Bungkus jadi APK dengan Capacitor.
