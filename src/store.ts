@@ -4,6 +4,7 @@ import {
   type BrushSettings,
   type GuideType,
   type HistoryInfo,
+  type InputInfo,
   type ToolId,
   type TouchMode,
 } from './engine/types';
@@ -13,6 +14,8 @@ export interface UIState {
   brush: BrushSettings;
   mirror: boolean;
   touchMode: TouchMode;
+  inputDebug: boolean;
+  input: InputInfo | null;
   guide: GuideType;
   gridVisible: boolean;
   guideVisible: boolean;
@@ -22,6 +25,8 @@ export interface UIState {
 
   setTool: (tool: ToolId) => void;
   setTouchMode: (mode: TouchMode) => void;
+  setInputDebug: (on: boolean) => void;
+  setInput: (info: InputInfo) => void;
   setBrush: (patch: Partial<BrushSettings>) => void;
   toggleMirror: () => void;
   setGuide: (guide: GuideType) => void;
@@ -38,6 +43,8 @@ export const useUI = create<UIState>((set) => ({
   brush: { ...DEFAULT_BRUSH },
   mirror: false,
   touchMode: 'auto',
+  inputDebug: false,
+  input: null,
   guide: 'plane',
   gridVisible: true,
   guideVisible: true,
@@ -47,6 +54,8 @@ export const useUI = create<UIState>((set) => ({
 
   setTool: (tool) => set({ tool }),
   setTouchMode: (touchMode) => set({ touchMode }),
+  setInputDebug: (inputDebug) => set({ inputDebug, input: null }),
+  setInput: (input) => set({ input }),
   setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
   toggleMirror: () => set((s) => ({ mirror: !s.mirror })),
   setGuide: (guide) => set({ guide }),
