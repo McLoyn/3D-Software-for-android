@@ -89,7 +89,7 @@ export class Engine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    this.scene.background = new THREE.Color('#151822');
+    this.scene.background = new THREE.Color('#e9eaef');
 
     const { width, height } = this.stageSize();
     this.renderer.setSize(width, height, false);
@@ -106,7 +106,7 @@ export class Engine {
     sun.position.set(4, 7, 5);
     this.scene.add(sun);
 
-    this.grid = new THREE.GridHelper(12, 24, 0x555b75, 0x303545);
+    this.grid = new THREE.GridHelper(12, 24, 0xaeb3c4, 0xd0d3de);
     this.scene.add(this.grid);
     this.scene.add(this.guides.root, this.layer.root);
 

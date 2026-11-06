@@ -28,9 +28,9 @@ export class Guides {
     const surface = new THREE.Mesh(
       geometry,
       new THREE.MeshBasicMaterial({
-        color: 0xffffff,
+        color: 0x8a90b0,
         transparent: true,
-        opacity: 0.025,
+        opacity: 0.06,
         side: THREE.DoubleSide,
         depthWrite: false,
       }),
@@ -38,10 +38,10 @@ export class Guides {
     const wire = new THREE.Mesh(
       geometry,
       new THREE.MeshBasicMaterial({
-        color: 0x9298bd,
+        color: 0x7f86a8,
         wireframe: true,
         transparent: true,
-        opacity: 0.35,
+        opacity: 0.55,
       }),
     );
     wire.raycast = () => {};

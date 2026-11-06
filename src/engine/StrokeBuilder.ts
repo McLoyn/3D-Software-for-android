@@ -174,10 +174,9 @@ export function buildStrokeGroup(draft: StrokeDraft): THREE.Group {
 
   const pressures = resolvePressures(draft.points, draft.pressures, draft.times);
   const pointRadii = pressures.map((p) => effectiveRadius(draft.radius, draft.pressureResponse, p));
-  const material = new THREE.MeshStandardMaterial({
+  // Tinta datar tanpa pencahayaan, seperti garis di Feather asli.
+  const material = new THREE.MeshBasicMaterial({
     color: draft.color,
-    roughness: 0.68,
-    metalness: 0.02,
     transparent: draft.opacity < 1,
     opacity: draft.opacity,
   });

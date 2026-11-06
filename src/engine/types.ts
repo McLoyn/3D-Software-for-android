@@ -23,8 +23,8 @@ export interface BrushSettings {
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {
-  color: '#b7aaff',
-  radius: 35,
+  color: '#1b1c22',
+  radius: 12,
   pressure: 70,
   opacity: 100,
 };
@@ -64,7 +64,7 @@ export interface HistoryInfo {
 }
 
 export const PROJECT_FORMAT = 'feather-android-prototype' as const;
-export const PROJECT_VERSION = '0.5';
+export const PROJECT_VERSION = '0.6';
 
 export interface ProjectFile {
   format: typeof PROJECT_FORMAT;
