@@ -134,6 +134,18 @@ export class Guides {
     return [...this.planes.values()].map((p) => p.data).sort((a, b) => a.id - b.id);
   }
 
+  getPlane(id: number): GuidePlaneData | undefined {
+    return this.planes.get(id)?.data;
+  }
+
+  /** Id bidang buatan pengguna terdepan yang tertembak ray, atau null (bola/kubus tidak dihitung). */
+  pick(raycaster: THREE.Raycaster): number | null {
+    if (!this.root.visible || this.planes.size === 0) return null;
+    const meshes = [...this.planes.values()].map((p) => p.mesh);
+    const hit = raycaster.intersectObjects(meshes, false)[0];
+    return hit ? (hit.object.userData.surfaceId as number) : null;
+  }
+
   /**
    * Titik tembak pada permukaan guide (sedikit diangkat ke arah kamera), atau null.
    * lock = null: uji semua permukaan, ambil yang terdekat. lock = id: uji hanya permukaan itu.

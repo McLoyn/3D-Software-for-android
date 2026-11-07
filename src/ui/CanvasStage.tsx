@@ -33,6 +33,7 @@ export function CanvasStage() {
       engine.setInputDebug(s.inputDebug);
       engine.setGuide(s.guide);
       engine.setGuideDraw(s.guideDraw);
+      engine.setOrtho(s.ortho);
       engine.setGridVisible(s.gridVisible);
       engine.setGuideVisible(s.guideVisible);
     };

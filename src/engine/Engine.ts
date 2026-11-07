@@ -1,8 +1,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { AddGuideCommand, AddStrokeCommand, BatchCommand, RemoveStrokeCommand } from './commands';
+import {
+  AddGuideCommand,
+  AddStrokeCommand,
+  BatchCommand,
+  RemoveGuideCommand,
+  RemoveStrokeCommand,
+} from './commands';
 import { Guides } from './Guides';
-import { History } from './History';
+import { History, type Command } from './History';
 import { parseProject } from './project';
 import { StrokeLayer } from './StrokeLayer';
 import {
@@ -19,6 +25,7 @@ import {
   type ToolId,
   type TouchMode,
   type Vec3Tuple,
+  type ViewId,
 } from './types';
 
 const MIN_POINT_DISTANCE = 0.018;
@@ -54,7 +61,12 @@ export class Engine {
   private readonly stage: HTMLElement;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
-  private readonly camera: THREE.PerspectiveCamera;
+  private readonly perspCamera: THREE.PerspectiveCamera;
+  private readonly orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+  private camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
+  private ortho = false;
+  /** Setengah tinggi tampilan ortografi (satuan dunia), diset saat beralih ke ortografi. */
+  private orthoHalfHeight = 4;
   private readonly controls: OrbitControls;
   private readonly grid: THREE.GridHelper;
   private readonly guides = new Guides();
@@ -95,6 +107,14 @@ export class Engine {
   /** Permukaan tempat goresan dimulai (null = belum ada); goresan tetap terkunci di sini. */
   private draftSurface: number | null = null;
   private draftNormal = new THREE.Vector3(0, 0, 1);
+  private erasing = false;
+  private erasePointerId = -1;
+  private eraseRemoved: StrokeData[] = [];
+  /** Bidang guide di bawah pointer saat eraser menyentuh (hanya dipakai bila tap kosong). */
+  private erasePlane: number | null = null;
+  private eraseDragged = false;
+  private eraseStartX = 0;
+  private eraseStartY = 0;
 
   constructor(canvas: HTMLCanvasElement, stage: HTMLElement) {
     this.canvas = canvas;
@@ -113,7 +133,8 @@ export class Engine {
     const { width, height } = this.stageSize();
     this.renderer.setSize(width, height, false);
 
-    this.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 100);
+    this.perspCamera = new THREE.PerspectiveCamera(42, width / height, 0.1, 100);
+    this.camera = this.perspCamera;
     this.camera.position.set(4.8, 3.8, 6.8);
 
     this.controls = new OrbitControls(this.camera, canvas);
@@ -192,6 +213,39 @@ export class Engine {
   }
 
   // ----------------------------------------------------------------- actions
+  setView(view: ViewId): void {
+    const dirs: Record<ViewId, THREE.Vector3> = {
+      front: new THREE.Vector3(0, 0, 1),
+      side: new THREE.Vector3(1, 0, 0),
+      top: new THREE.Vector3(0, 1, 0),
+    };
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    this.camera.position.copy(this.controls.target).addScaledVector(dirs[view], dist);
+    this.controls.update();
+    this.invalidate();
+  }
+
+  setOrtho(on: boolean): void {
+    if (this.ortho === on) return;
+    this.ortho = on;
+    const target = this.controls.target;
+    const offset = this.camera.position.clone().sub(target);
+    const next = on ? this.orthoCamera : this.perspCamera;
+    if (on) {
+      // Samakan ukuran objek di titik target dengan kamera perspektif.
+      this.orthoCamera.zoom = 1;
+      this.orthoHalfHeight = offset.length() * Math.tan(THREE.MathUtils.degToRad(this.perspCamera.fov / 2));
+    } else {
+      offset.divideScalar(this.orthoCamera.zoom);
+    }
+    next.position.copy(target).add(offset);
+    next.quaternion.copy(this.camera.quaternion);
+    this.camera = next;
+    this.controls.object = next;
+    this.applyCameraSize();
+    this.controls.update();
+    this.invalidate();
+  }
 
   undo(): void {
     this.history.undo();
@@ -211,6 +265,8 @@ export class Engine {
   resetView(): void {
     this.camera.position.set(4.8, 3.8, 6.8);
     this.controls.target.set(0, 0, 0);
+    this.orthoCamera.zoom = 1;
+    this.orthoCamera.updateProjectionMatrix();
     this.controls.update();
     this.invalidate();
   }
@@ -271,6 +327,8 @@ export class Engine {
 
   /** Apa yang dilakukan sebuah pointer: menavigasi kamera, menggambar, atau menghapus. */
   private modeFor(e: PointerEvent): 'navigate' | 'draw' | 'erase' {
+    // Tombol penghapus fisik pada pena selalu menghapus, apa pun tool-nya.
+    if (e.pointerType === 'pen' && (e.buttons & 32) !== 0) return 'erase';
     const tool = this.tool;
     if (tool === 'orbit') return 'navigate';
     // Tombol kanan/tengah mouse selalu untuk navigasi (pan/zoom), apa pun tool-nya.
@@ -287,15 +345,15 @@ export class Engine {
     if (e.pointerType === 'pen') this.penSeen = true;
     this.reportInput(e, true);
     // Saat goresan sedang dibuat, semua pointer lain (mis. telapak tangan) tidak boleh menggerakkan kamera.
-    this.controls.enabled = !this.drawing && this.modeFor(e) === 'navigate';
+    this.controls.enabled = !this.drawing && !this.erasing && this.modeFor(e) === 'navigate';
   };
 
   private readonly onPointerDown = (e: PointerEvent): void => {
-    if (this.drawing) return;
+    if (this.drawing || this.erasing) return;
     const mode = this.modeFor(e);
     if (mode === 'navigate') return;
     if (mode === 'erase') {
-      this.eraseAt(e);
+      this.beginErase(e);
       return;
     }
 
@@ -324,6 +382,11 @@ export class Engine {
 
   private readonly onPointerMove = (e: PointerEvent): void => {
     this.reportInput(e, false);
+    if (this.erasing && e.pointerId === this.erasePointerId) {
+      const coalesced = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+      for (const sample of coalesced.length > 0 ? coalesced : [e]) this.eraseSample(sample);
+      return;
+    }
     if (!this.drawing || e.pointerId !== this.activePointerId || !this.draftStyle) return;
 
     // Chrome menggabungkan beberapa sampel stylus ke satu event; ambil semuanya agar garis dan
@@ -387,6 +450,10 @@ export class Engine {
 
   private readonly onPointerEnd = (e: PointerEvent): void => {
     this.reportInput(e, true);
+    if (this.erasing && e.pointerId === this.erasePointerId) {
+      this.endErase(e);
+      return;
+    }
     if (!this.drawing || e.pointerId !== this.activePointerId) return;
 
     this.drawing = false;
@@ -413,7 +480,7 @@ export class Engine {
         this.guideDraw = false;
         const plane = this.planeFromStroke(stroke.points);
         if (plane) {
-          this.history.execute(new BatchCommand([addStroke, new AddGuideCommand(this.guides, plane)]));
+          this.history.execute(new AddGuideCommand(this.guides, plane));
         } else {
           this.history.execute(addStroke);
         }
@@ -430,12 +497,55 @@ export class Engine {
     this.draftSurface = null;
   };
 
-  private eraseAt(e: PointerEvent): void {
+  private beginErase(e: PointerEvent): void {
+    this.erasing = true;
+    this.erasePointerId = e.pointerId;
+    this.eraseRemoved = [];
+    this.eraseDragged = false;
+    this.eraseStartX = e.clientX;
+    this.eraseStartY = e.clientY;
+    this.canvas.setPointerCapture(e.pointerId);
+    // Tap di bidang kosong (tanpa goresan kena, tanpa geser) menghapus bidang guide.
+    this.erasePlane = this.eraseStrokeAt(e) ? null : this.guides.pick(this.raycaster);
+  }
+
+  /** Hapus goresan teratas di bawah pointer langsung dari layer. True bila ada yang terhapus. */
+  private eraseStrokeAt(e: PointerEvent): boolean {
     this.setRay(e);
     const id = this.layer.pick(this.raycaster);
-    if (id === null) return;
+    if (id === null) return false;
     const stroke = this.layer.get(id);
-    if (stroke) this.history.execute(new RemoveStrokeCommand(this.layer, stroke));
+    if (!stroke) return false;
+    this.eraseRemoved.push(stroke);
+    this.layer.remove(id);
+    this.invalidate();
+    return true;
+  }
+
+  private eraseSample(e: PointerEvent): void {
+    if (!this.eraseDragged) {
+      const moved = Math.hypot(e.clientX - this.eraseStartX, e.clientY - this.eraseStartY);
+      if (moved > 6) this.eraseDragged = true;
+    }
+    this.eraseStrokeAt(e);
+  }
+
+  /** Satu gestur hapus = satu langkah undo. Penghapusan sudah terjadi; execute() aman karena remove idempoten. */
+  private endErase(e: PointerEvent): void {
+    this.erasing = false;
+    try {
+      this.canvas.releasePointerCapture(e.pointerId);
+    } catch {
+      // pointer capture sudah dilepas oleh browser
+    }
+    const commands: Command[] = this.eraseRemoved.map((s) => new RemoveStrokeCommand(this.layer, s));
+    if (commands.length === 0 && !this.eraseDragged && this.erasePlane !== null) {
+      const plane = this.guides.getPlane(this.erasePlane);
+      if (plane) commands.push(new RemoveGuideCommand(this.guides, plane));
+    }
+    if (commands.length > 0) this.history.execute(new BatchCommand(commands));
+    this.eraseRemoved = [];
+    this.erasePlane = null;
   }
 
   private setRay(e: PointerEvent): void {
@@ -479,6 +589,18 @@ export class Engine {
   
 
   // ---------------------------------------------------------------- internals
+  private applyCameraSize(): void {
+    const { width, height } = this.stageSize();
+    const aspect = width / height;
+    this.perspCamera.aspect = aspect;
+    this.perspCamera.updateProjectionMatrix();
+    const h = this.orthoHalfHeight;
+    this.orthoCamera.left = -h * aspect;
+    this.orthoCamera.right = h * aspect;
+    this.orthoCamera.top = h;
+    this.orthoCamera.bottom = -h;
+    this.orthoCamera.updateProjectionMatrix();
+  }
   
   private invalidate(): void {
     this.needsRender = true;
@@ -494,8 +616,7 @@ export class Engine {
   private resize(): void {
     const { width, height } = this.stageSize();
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    this.applyCameraSize();
     this.invalidate();
   }
 

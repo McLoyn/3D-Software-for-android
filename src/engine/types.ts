@@ -1,5 +1,6 @@
 export type ToolId = 'draw' | 'erase' | 'orbit';
 export type GuideType = 'plane' | 'sphere' | 'cube';
+export type ViewId = 'front' | 'side' | 'top';
 
 /**
  * Perilaku sentuhan jari.
@@ -64,7 +65,7 @@ export interface HistoryInfo {
 }
 
 export const PROJECT_FORMAT = 'feather-android-prototype' as const;
-export const PROJECT_VERSION = '0.8';
+export const PROJECT_VERSION = '0.9';
 
 /** Bidang panduan buatan pengguna (Draw 3D Guide). */
 export interface GuidePlaneData {

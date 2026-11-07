@@ -4,6 +4,7 @@ import { GuideBar } from './ui/GuideBar';
 import { Header } from './ui/Header';
 import { StatusBar } from './ui/StatusBar';
 import { Toolbar } from './ui/Toolbar';
+import { ViewBar } from './ui/ViewBar';
 
 export default function App() {
   return (
@@ -12,6 +13,7 @@ export default function App() {
       <Header />
       <Toolbar />
       <GuideBar />
+      <ViewBar />
       <BrushPanel />
       <StatusBar />
     </div>

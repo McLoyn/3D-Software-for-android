@@ -73,3 +73,21 @@ export class BatchCommand implements Command {
     for (let i = this.items.length - 1; i >= 0; i--) this.items[i].undo();
   }
 }
+
+export class RemoveGuideCommand implements Command {
+  private readonly guides: Guides;
+  private readonly plane: GuidePlaneData;
+
+  constructor(guides: Guides, plane: GuidePlaneData) {
+    this.guides = guides;
+    this.plane = plane;
+  }
+
+  do(): void {
+    this.guides.removePlane(this.plane.id);
+  }
+
+  undo(): void {
+    this.guides.addPlane(this.plane);
+  }
+}
