@@ -5,6 +5,7 @@ const TOOLS: { id: ToolId; icon: string; title: string }[] = [
   { id: 'draw', icon: '✎', title: '3D Brush' },
   { id: 'erase', icon: '⌫', title: 'Eraser' },
   { id: 'orbit', icon: '◉', title: 'Orbit' },
+  { id: 'select', icon: '⬚', title: 'Select' },
 ];
 
 /** Panel alat di kiri: alat, warna, ukuran, dan opasitas kuas. */

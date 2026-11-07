@@ -1,4 +1,5 @@
-export type ToolId = 'draw' | 'erase' | 'orbit';
+export type ToolId = 'draw' | 'erase' | 'orbit' | 'select';
+export type TransformMode = 'move' | 'rotate' | 'scale';
 export type GuideType = 'plane' | 'sphere' | 'cube';
 export type ViewId = 'front' | 'side' | 'top';
 
@@ -62,10 +63,11 @@ export interface HistoryInfo {
   strokeCount: number;
   canUndo: boolean;
   canRedo: boolean;
+  selectionCount: number;
 }
 
 export const PROJECT_FORMAT = 'feather-android-prototype' as const;
-export const PROJECT_VERSION = '0.9';
+export const PROJECT_VERSION = '1.0';
 
 /** Bidang panduan buatan pengguna (Draw 3D Guide). */
 export interface GuidePlaneData {

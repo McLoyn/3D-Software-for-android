@@ -1,4 +1,4 @@
-# Feather Android · Build 0.6
+# Feather Android · Build 1.0
 
 Klona Feather 3D untuk Android (target: PocoPad). Build 0.3 memigrasikan prototipe satu file HTML
 ke **React + TypeScript + Vite** dengan inti 3D yang terpisah dari UI. Build 0.4 menambahkan
@@ -95,8 +95,13 @@ Perilaku gambar sama. Perubahan yang ikut terjadi karena arsitektur baru:
 - Tombol **Open** untuk memuat `.fthr.json` (juga file dari Build 0.2).
 - Tanpa CDN: Three.js dibundel lokal, jadi bisa jalan offline.
 
+## Select dan Transform (Build 1.0)
+
+Tool Select menambah fitur tap untuk memilih goresan, lasso multi-select, serta transformasi Move/Rotate/Scale dengan preview langsung. Duplikasi, mirror, dan delete mengikuti operasi satu undo step, sementara transformasi mirroring di-bake jadi dua stroke independen.
+
 ## Yang belum dikerjakan
 
+- Gizmo/joystick sumbu untuk transformasi, Group, ekspor GLTF/OBJ.
 - Bayangan jatuh dan permukaan terisi (fill) seperti di Feather asli.
 - Pipet warna, preset kuas, dan palet warna.
 - Eraser belum menghapus saat digeser, hanya saat diketuk.

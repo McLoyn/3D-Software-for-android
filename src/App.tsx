@@ -1,3 +1,4 @@
+import { ActionBar } from './ui/ActionBar';
 import { BrushPanel } from './ui/BrushPanel';
 import { CanvasStage } from './ui/CanvasStage';
 import { GuideBar } from './ui/GuideBar';
@@ -14,6 +15,7 @@ export default function App() {
       <Toolbar />
       <GuideBar />
       <ViewBar />
+      <ActionBar />
       <BrushPanel />
       <StatusBar />
     </div>

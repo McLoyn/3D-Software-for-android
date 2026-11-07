@@ -1,0 +1,683 @@
+# TASK: Implement Build 1.0 "Select dan Transform" in repo feather-android (React + TS + Vite + Three.js)
+
+## RULES (read first)
+- Apply ONLY the changes below. Do NOT refactor, rename, reformat, or touch anything not listed.
+- Keep existing code comments (Indonesian) and style (2 spaces, single quotes, semicolons).
+- Do the steps IN ORDER. After step 8 run `npm run typecheck` and fix only errors caused by these edits.
+- "FIND/REPLACE" = exact text anchor. "ADD" = insert at the stated place.
+- Do not add dependencies. `tsconfig` is strict with noUnusedLocals/noUnusedParameters: no unused imports or variables.
+- Baseline is Build 0.9 (drag eraser, ortho, quick views already present).
+
+## FEATURES (context)
+A. New tool "Select" (toolbar). Two gestures, both ADDITIVE:
+   - TAP near a stroke (within ~28px) toggles that stroke in the selection. Tap on empty space clears the selection.
+   - DRAG draws a freehand lasso; strokes with at least one point inside the lasso are added.
+   Selected strokes turn accent color (#4a3fd0) and a bounding box is shown.
+B. Transform (contextual ActionBar, only when tool = Select): Move / Rotate / Scale toggle buttons.
+   While one is active and the selection is not empty, DRAGGING on the canvas transforms the selection with a live preview.
+   - Move: translate in the camera view plane. Rotate: horizontal drag = around world Y, vertical drag = around camera right axis
+     (pivot = selection bounds center). Scale: drag up = bigger, drag down = smaller (uniform, also scales stroke thickness).
+   One gesture = ONE undo step.
+C. Duplicate (in place, copies become the selection), Duplicate Symmetric (mirror across X=0 plane), Delete, Deselect.
+D. Mirrored strokes (mirror=true) are "baked" when transformed: original and its twin become two independent strokes (mirror=false).
+
+DESIGN NOTES
+- All edits to strokes go through ONE generic command `ReplaceStrokesCommand(before[], after[])`:
+  do() removes every `before` id then adds every `after`; undo() removes every `after` id then adds every `before`.
+- Selection lives in `StrokeLayer` (a Set of ids). `layer.remove()` automatically drops an id from the selection.
+- Live preview during a transform = setting `group.matrix` on the selected stroke groups (no mesh rebuild). On release the matrix is
+  baked into stroke data and committed via the command.
+
+---
+
+## STEP 1 — `src/engine/types.ts`
+FIND: `export type ToolId = 'draw' | 'erase' | 'orbit';`
+REPLACE: `export type ToolId = 'draw' | 'erase' | 'orbit' | 'select';`
+
+ADD (below `export type ViewId ...`):
+```ts
+export type TransformMode = 'move' | 'rotate' | 'scale';
+```
+In `interface HistoryInfo` add field after `canRedo: boolean;`:
+```ts
+  selectionCount: number;
+```
+FIND: `export const PROJECT_VERSION = '0.9';`
+REPLACE: `export const PROJECT_VERSION = '1.0';`
+
+## STEP 2 — `src/engine/StrokeLayer.ts`
+2a. ADD below the imports:
+```ts
+const SELECT_COLOR = '#4a3fd0';
+```
+2b. ADD field inside class, below `private preview: THREE.Group | null = null;`:
+```ts
+  private readonly selected = new Set<number>();
+```
+2c. In `remove(id)`, add `this.selected.delete(id);` right after `this.entries.delete(id);`.
+
+2d. ADD these members inside the class (below `all()`):
+```ts
+  get selection(): number[] {
+    return [...this.selected];
+  }
+
+  get selectionCount(): number {
+    return this.selected.size;
+  }
+
+  /** Mengganti seleksi. Id yang tidak ada diabaikan. Goresan terpilih diwarnai SELECT_COLOR. */
+  setSelection(ids: Iterable<number>): void {
+    const touched = new Set(this.selected);
+    this.selected.clear();
+    for (const id of ids) {
+      if (this.entries.has(id)) {
+        this.selected.add(id);
+        touched.add(id);
+      }
+    }
+    for (const id of touched) this.tint(id);
+  }
+
+  /** Kotak pembatas gabungan semua goresan terpilih (kosong bila tak ada seleksi). */
+  selectionBounds(): THREE.Box3 {
+    const box = new THREE.Box3();
+    for (const id of this.selected) {
+      const entry = this.entries.get(id);
+      if (entry) box.expandByObject(entry.group);
+    }
+    return box;
+  }
+
+  /** Pratinjau transformasi: matrix diterapkan ke group (tanpa membangun ulang mesh). null = kembalikan. */
+  setPreviewMatrix(ids: Iterable<number>, matrix: THREE.Matrix4 | null): void {
+    for (const id of ids) {
+      const entry = this.entries.get(id);
+      if (!entry) continue;
+      if (matrix) {
+        entry.group.matrix.copy(matrix);
+        entry.group.matrixAutoUpdate = false;
+      } else {
+        entry.group.matrixAutoUpdate = true;
+      }
+      entry.group.matrixWorldNeedsUpdate = true;
+    }
+  }
+
+  private tint(id: number): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    const color = this.selected.has(id) ? SELECT_COLOR : entry.data.color;
+    entry.group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) (obj.material as THREE.MeshBasicMaterial).color.set(color);
+    });
+  }
+```
+
+## STEP 3 — `src/engine/commands.ts`
+APPEND at end of file:
+```ts
+/** Mengganti sekumpulan goresan sekaligus (transformasi, duplikat, hapus). Satu langkah undo. */
+export class ReplaceStrokesCommand implements Command {
+  private readonly layer: StrokeLayer;
+  private readonly before: StrokeData[];
+  private readonly after: StrokeData[];
+
+  constructor(layer: StrokeLayer, before: StrokeData[], after: StrokeData[]) {
+    this.layer = layer;
+    this.before = before;
+    this.after = after;
+  }
+
+  do(): void {
+    for (const s of this.before) this.layer.remove(s.id);
+    for (const s of this.after) this.layer.add(s);
+  }
+
+  undo(): void {
+    for (const s of this.after) this.layer.remove(s.id);
+    for (const s of this.before) this.layer.add(s);
+  }
+}
+```
+
+## STEP 4 — `src/engine/Engine.ts`
+
+4a. Imports. In the './commands' import list add `ReplaceStrokesCommand,` (after `RemoveStrokeCommand,`).
+In the './types' import list add `type TransformMode,` (after `type ToolId,`).
+
+4b. After the `interface SurfaceHit { ... }` block ADD:
+```ts
+interface PxPoint {
+  x: number;
+  y: number;
+}
+
+/** Gerakan kurang dari ini (piksel) dianggap ketukan, bukan lasso. */
+const TAP_SLOP = 10;
+/** Radius pencarian goresan terdekat saat ketuk (piksel). */
+const TAP_PICK_RADIUS = 28;
+const ROTATE_SPEED = 0.01;
+const SCALE_SPEED = 0.005;
+
+/** Uji titik di dalam poligon (ray casting). */
+const inPolygon = (p: PxPoint, poly: PxPoint[]): boolean => {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    const crosses = a.y > p.y !== b.y > p.y;
+    if (crosses && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+};
+```
+
+4c. Callback field, below `onGuideDrawEnd?`:
+```ts
+  /** Titik lasso (piksel kanvas) saat memilih; null saat selesai. Dipakai untuk overlay. */
+  onLasso?: (points: PxPoint[] | null) => void;
+```
+
+4d. Fields. ADD after `private eraseStartY = 0;`:
+```ts
+  private readonly selectionBox = new THREE.Box3Helper(new THREE.Box3(), 0x4a3fd0);
+  private selecting = false;
+  private selectPointerId = -1;
+  private lasso: PxPoint[] = [];
+  private lassoLength = 0;
+  private transformMode: TransformMode | null = null;
+  private transforming = false;
+  private transformPointerId = -1;
+  private transformStartX = 0;
+  private transformStartY = 0;
+  private transformMoved = false;
+  private transformScale = 1;
+  private readonly transformPivot = new THREE.Vector3();
+  private readonly transformMatrix = new THREE.Matrix4();
+```
+ADD a getter right after the fields block (before the constructor):
+```ts
+  /** True bila ada gestur pointer yang sedang berjalan (gambar/hapus/pilih/transformasi). */
+  private get busy(): boolean {
+    return this.drawing || this.erasing || this.selecting || this.transforming;
+  }
+```
+
+4e. Constructor. FIND: `this.scene.add(this.guides.root, this.layer.root);`
+REPLACE:
+```ts
+    this.scene.add(this.guides.root, this.layer.root);
+    this.selectionBox.visible = false;
+    this.selectionBox.frustumCulled = false;
+    this.scene.add(this.selectionBox);
+```
+
+4f. Settings section. REPLACE `setTool` with:
+```ts
+  setTool(tool: ToolId): void {
+    this.tool = tool;
+    if (tool !== 'select' && this.layer.selectionCount > 0) this.setSelection([]);
+  }
+```
+ADD (after `setGuideDraw`):
+```ts
+  setTransformMode(mode: TransformMode | null): void {
+    this.transformMode = mode;
+  }
+```
+
+4g. Actions section. ADD (after `setOrtho`):
+```ts
+  clearSelection(): void {
+    this.setSelection([]);
+  }
+
+  /** Duplikat di tempat; salinan menjadi seleksi. symmetric = cerminkan pada bidang X=0 (goresan mirror dilewati). */
+  duplicateSelection(symmetric: boolean): void {
+    const identity = new THREE.Matrix4();
+    const copies: StrokeData[] = [];
+    for (const s of this.selectedStrokes()) {
+      if (symmetric) {
+        if (!s.mirror) copies.push(this.copyStroke(s, this.nextId++, identity, 1, true, false));
+      } else {
+        copies.push(this.copyStroke(s, this.nextId++, identity, 1, false, s.mirror));
+      }
+    }
+    if (copies.length === 0) return;
+    this.history.execute(new ReplaceStrokesCommand(this.layer, [], copies));
+    this.setSelection(copies.map((s) => s.id));
+  }
+
+  deleteSelection(): void {
+    const before = this.selectedStrokes();
+    if (before.length === 0) return;
+    this.history.execute(new ReplaceStrokesCommand(this.layer, before, []));
+  }
+```
+
+4h. `modeFor`. FIND the signature `private modeFor(e: PointerEvent): 'navigate' | 'draw' | 'erase' {`
+REPLACE with `private modeFor(e: PointerEvent): 'navigate' | 'draw' | 'erase' | 'select' | 'transform' {`
+Then FIND the last statement of the function `return tool;` and REPLACE with:
+```ts
+    if (tool === 'select') {
+      return this.transformMode !== null && this.layer.selectionCount > 0 ? 'transform' : 'select';
+    }
+    return tool;
+```
+
+4i. `onPointerDownCapture`: FIND `this.controls.enabled = !this.drawing && !this.erasing && this.modeFor(e) === 'navigate';`
+REPLACE `this.controls.enabled = !this.busy && this.modeFor(e) === 'navigate';`
+
+4j. `onPointerDown`: FIND `if (this.drawing || this.erasing) return;`
+REPLACE `if (this.busy) return;`
+FIND:
+```ts
+    if (mode === 'erase') {
+      this.beginErase(e);
+      return;
+    }
+```
+REPLACE:
+```ts
+    if (mode === 'erase') {
+      this.beginErase(e);
+      return;
+    }
+    if (mode === 'select') {
+      this.beginSelect(e);
+      return;
+    }
+    if (mode === 'transform') {
+      this.beginTransform(e);
+      return;
+    }
+```
+
+4k. `onPointerMove`: ADD right after the existing `if (this.erasing && ...) { ... return; }` block:
+```ts
+    if (this.selecting && e.pointerId === this.selectPointerId) {
+      this.selectMove(e);
+      return;
+    }
+    if (this.transforming && e.pointerId === this.transformPointerId) {
+      this.transformMove(e);
+      return;
+    }
+```
+
+4l. `onPointerEnd`: ADD right after the existing erase block (`this.endErase(e); return; }`):
+```ts
+    if (this.selecting && e.pointerId === this.selectPointerId) {
+      this.endSelect(e);
+      return;
+    }
+    if (this.transforming && e.pointerId === this.transformPointerId) {
+      this.endTransform(e);
+      return;
+    }
+```
+
+4m. ADD these methods in the input section (below `endErase`):
+```ts
+  // ----------------------------------------------------------- select / transform
+
+  private canvasPoint(e: PointerEvent): PxPoint {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  /** Titik goresan dalam piksel kanvas (titik di belakang kamera dilewati; sisi cermin ikut dihitung). */
+  private strokePx(stroke: StrokeData): PxPoint[] {
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const v = new THREE.Vector3();
+    const out: PxPoint[] = [];
+    for (const flip of stroke.mirror ? [false, true] : [false]) {
+      for (const [x, y, z] of stroke.points) {
+        v.set(flip ? -x : x, y, z).project(this.camera);
+        if (v.z > 1) continue;
+        out.push({ x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h });
+      }
+    }
+    return out;
+  }
+
+  private selectedStrokes(): StrokeData[] {
+    return this.layer
+      .selection.map((id) => this.layer.get(id))
+      .filter((s): s is StrokeData => s !== undefined);
+  }
+
+  private setSelection(ids: Iterable<number>): void {
+    this.layer.setSelection(ids);
+    this.emit();
+  }
+
+  private updateSelectionBox(): void {
+    const box = this.layer.selectionBounds();
+    if (box.isEmpty()) {
+      this.selectionBox.visible = false;
+      return;
+    }
+    this.selectionBox.box.copy(box);
+    this.selectionBox.visible = true;
+  }
+
+  private beginSelect(e: PointerEvent): void {
+    this.selecting = true;
+    this.selectPointerId = e.pointerId;
+    this.canvas.setPointerCapture(e.pointerId);
+    this.lasso = [this.canvasPoint(e)];
+    this.lassoLength = 0;
+  }
+
+  private selectMove(e: PointerEvent): void {
+    const p = this.canvasPoint(e);
+    const last = this.lasso[this.lasso.length - 1];
+    const d = Math.hypot(p.x - last.x, p.y - last.y);
+    if (d < 3) return;
+    this.lassoLength += d;
+    this.lasso.push(p);
+    if (this.lassoLength >= TAP_SLOP) this.onLasso?.(this.lasso);
+  }
+
+  private endSelect(e: PointerEvent): void {
+    this.selecting = false;
+    try {
+      this.canvas.releasePointerCapture(e.pointerId);
+    } catch {
+      // pointer capture sudah dilepas oleh browser
+    }
+    this.onLasso?.(null);
+    const path = this.lasso;
+    this.lasso = [];
+    if (this.lassoLength < TAP_SLOP) {
+      this.tapSelect(path[0]);
+    } else if (path.length >= 3) {
+      this.lassoSelect(path);
+    }
+  }
+
+  /** Ketuk: toggle goresan terdekat; ketuk kosong: bersihkan seleksi. */
+  private tapSelect(p: PxPoint): void {
+    let best: number | null = null;
+    let bestDist = TAP_PICK_RADIUS;
+    for (const s of this.layer.all()) {
+      for (const q of this.strokePx(s)) {
+        const d = Math.hypot(q.x - p.x, q.y - p.y);
+        if (d < bestDist) {
+          bestDist = d;
+          best = s.id;
+        }
+      }
+    }
+    if (best === null) {
+      this.setSelection([]);
+      return;
+    }
+    const ids = new Set(this.layer.selection);
+    if (ids.has(best)) ids.delete(best);
+    else ids.add(best);
+    this.setSelection(ids);
+  }
+
+  /** Lasso: tambahkan goresan yang punya minimal satu titik di dalam poligon. */
+  private lassoSelect(poly: PxPoint[]): void {
+    const ids = new Set(this.layer.selection);
+    for (const s of this.layer.all()) {
+      if (this.strokePx(s).some((q) => inPolygon(q, poly))) ids.add(s.id);
+    }
+    this.setSelection(ids);
+  }
+
+  /** Ukuran satu piksel layar dalam satuan dunia pada kedalaman titik tertentu. */
+  private worldPerPixel(at: THREE.Vector3): number {
+    const height = Math.max(1, this.canvas.clientHeight);
+    if (this.camera instanceof THREE.OrthographicCamera) {
+      return (this.camera.top - this.camera.bottom) / this.camera.zoom / height;
+    }
+    const dist = this.camera.position.distanceTo(at);
+    return (2 * dist * Math.tan(THREE.MathUtils.degToRad(this.perspCamera.fov / 2))) / height;
+  }
+
+  private beginTransform(e: PointerEvent): void {
+    const box = this.layer.selectionBounds();
+    if (box.isEmpty() || this.transformMode === null) return;
+    this.transforming = true;
+    this.transformPointerId = e.pointerId;
+    this.canvas.setPointerCapture(e.pointerId);
+    box.getCenter(this.transformPivot);
+    this.transformStartX = e.clientX;
+    this.transformStartY = e.clientY;
+    this.transformMatrix.identity();
+    this.transformScale = 1;
+    this.transformMoved = false;
+    this.camera.updateMatrixWorld();
+  }
+
+  private transformMove(e: PointerEvent): void {
+    const dx = e.clientX - this.transformStartX;
+    const dy = e.clientY - this.transformStartY;
+    if (!this.transformMoved && Math.hypot(dx, dy) < 3) return;
+    this.transformMoved = true;
+
+    const p = this.transformPivot;
+    const m = this.transformMatrix.identity();
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).normalize();
+    const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1).normalize();
+    let scale = 1;
+
+    if (this.transformMode === 'move') {
+      const k = this.worldPerPixel(p);
+      const t = right.multiplyScalar(dx * k).addScaledVector(up, -dy * k);
+      m.makeTranslation(t.x, t.y, t.z);
+    } else if (this.transformMode === 'rotate') {
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * ROTATE_SPEED);
+      q.premultiply(new THREE.Quaternion().setFromAxisAngle(right, dy * ROTATE_SPEED));
+      m.makeTranslation(p.x, p.y, p.z)
+        .multiply(new THREE.Matrix4().makeRotationFromQuaternion(q))
+        .multiply(new THREE.Matrix4().makeTranslation(-p.x, -p.y, -p.z));
+    } else if (this.transformMode === 'scale') {
+      scale = THREE.MathUtils.clamp(Math.exp(-dy * SCALE_SPEED), 0.05, 20);
+      m.makeTranslation(p.x, p.y, p.z)
+        .multiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+        .multiply(new THREE.Matrix4().makeTranslation(-p.x, -p.y, -p.z));
+    }
+    this.transformScale = scale;
+
+    this.layer.setPreviewMatrix(this.layer.selection, m);
+    this.updateSelectionBox();
+    this.invalidate();
+  }
+
+  private endTransform(e: PointerEvent): void {
+    this.transforming = false;
+    try {
+      this.canvas.releasePointerCapture(e.pointerId);
+    } catch {
+      // pointer capture sudah dilepas oleh browser
+    }
+    this.layer.setPreviewMatrix(this.layer.selection, null);
+    if (this.transformMoved) this.commitTransform();
+    this.updateSelectionBox();
+    this.invalidate();
+  }
+
+  /** Menanamkan transformMatrix ke data goresan terpilih sebagai satu langkah undo. */
+  private commitTransform(): void {
+    const before = this.selectedStrokes();
+    const after: StrokeData[] = [];
+    for (const s of before) {
+      after.push(this.copyStroke(s, s.id, this.transformMatrix, this.transformScale, false, false));
+      // Goresan mirror: sisi cerminnya dijadikan goresan sendiri agar ikut bertransformasi.
+      if (s.mirror) {
+        after.push(this.copyStroke(s, this.nextId++, this.transformMatrix, this.transformScale, true, false));
+      }
+    }
+    if (after.length === 0) return;
+    this.history.execute(new ReplaceStrokesCommand(this.layer, before, after));
+    this.setSelection(after.map((s) => s.id));
+  }
+
+  /** Salinan goresan dengan titik ditransformasi (flip = cerminkan X dulu) dan radius diskalakan. */
+  private copyStroke(
+    s: StrokeData,
+    id: number,
+    m: THREE.Matrix4,
+    scale: number,
+    flip: boolean,
+    mirror: boolean,
+  ): StrokeData {
+    const v = new THREE.Vector3();
+    const points = s.points.map(([x, y, z]) => toTuple(v.set(flip ? -x : x, y, z).applyMatrix4(m)));
+    return { ...s, id, points, radius: s.radius * scale, mirror };
+  }
+```
+
+4n. `emit()`. REPLACE the whole method with:
+```ts
+  private emit(): void {
+    this.invalidate();
+    this.updateSelectionBox();
+    this.onChange?.({
+      strokeCount: this.layer.count,
+      canUndo: this.history.canUndo,
+      canRedo: this.history.canRedo,
+      selectionCount: this.layer.selectionCount,
+    });
+  }
+```
+
+4o. `dispose()`: ADD before `this.renderer.dispose();`:
+```ts
+    this.selectionBox.geometry.dispose();
+    (this.selectionBox.material as THREE.Material).dispose();
+```
+and next to `this.onInput = undefined;` add `this.onLasso = undefined;`.
+
+## STEP 5 — `src/store.ts`
+- Import: add `type TransformMode,` to the './engine/types' import list.
+- `interface UIState`: add state `transform: TransformMode | null;` (after `ortho: boolean;`) and action `setTransform: (mode: TransformMode | null) => void;` (after `toggleOrtho`).
+- Initial values: add `transform: null,` (after `ortho: false,`). Change the `history:` initial value to
+  `history: { strokeCount: 0, canUndo: false, canRedo: false, selectionCount: 0 },`
+- Actions: add `setTransform: (transform) => set({ transform }),` (after `toggleOrtho`).
+
+## STEP 6 — UI
+6a. `src/ui/Toolbar.tsx`: in `TOOLS` add as the LAST item:
+```ts
+  { id: 'select', icon: '⬚', title: 'Select' },
+```
+6b. `src/ui/CanvasStage.tsx`:
+- Add a ref next to the others: `const lassoRef = useRef<SVGPolylineElement>(null);`
+- After `engine.onGuideDrawEnd = ...` block add:
+```ts
+    engine.onLasso = (points) => {
+      lassoRef.current?.setAttribute('points', points ? points.map((p) => `${p.x},${p.y}`).join(' ') : '');
+    };
+```
+- In `apply`, add `engine.setTransformMode(s.transform);` after `engine.setOrtho(s.ortho);`.
+- In the JSX, right after `<canvas id="view" ref={canvasRef} />` add:
+```tsx
+      <svg className="lasso">
+        <polyline ref={lassoRef} points="" />
+      </svg>
+```
+6c. CREATE `src/ui/ActionBar.tsx`:
+```tsx
+import type { TransformMode } from '../engine/types';
+import { getEngine } from '../engineRef';
+import { useUI } from '../store';
+
+const MODES: { id: TransformMode; label: string; title: string }[] = [
+  { id: 'move', label: 'Move', title: 'Move: drag to move in the view plane' },
+  { id: 'rotate', label: 'Rotate', title: 'Rotate: horizontal = around Y, vertical = around screen X' },
+  { id: 'scale', label: 'Scale', title: 'Scale: drag up = bigger, drag down = smaller' },
+];
+
+/** Panel aksi seleksi (muncul saat tool Select aktif): transformasi, duplikat, hapus. */
+export function ActionBar() {
+  const tool = useUI((s) => s.tool);
+  const transform = useUI((s) => s.transform);
+  const count = useUI((s) => s.history.selectionCount);
+  const setTransform = useUI((s) => s.setTransform);
+
+  if (tool !== 'select') return null;
+  const none = count === 0;
+
+  return (
+    <div className="pill action-bar">
+      <span className="count">{count} selected</span>
+      {MODES.map((m) => (
+        <button
+          key={m.id}
+          className={transform === m.id ? 'active' : ''}
+          disabled={none}
+          title={m.title}
+          onClick={() => setTransform(transform === m.id ? null : m.id)}
+        >
+          {m.label}
+        </button>
+      ))}
+      <div className="vdivider" />
+      <button disabled={none} title="Duplicate" onClick={() => getEngine()?.duplicateSelection(false)}>
+        Dup
+      </button>
+      <button disabled={none} title="Duplicate mirrored on X" onClick={() => getEngine()?.duplicateSelection(true)}>
+        Sym
+      </button>
+      <button disabled={none} title="Delete" onClick={() => getEngine()?.deleteSelection()}>
+        Del
+      </button>
+      <button
+        disabled={none}
+        title="Deselect"
+        onClick={() => {
+          setTransform(null);
+          getEngine()?.clearSelection();
+        }}
+      >
+        None
+      </button>
+    </div>
+  );
+}
+```
+6d. `src/App.tsx`: add `import { ActionBar } from './ui/ActionBar';` (first in the import list, alphabetical) and render `<ActionBar />` right after `<ViewBar />`.
+6e. `src/styles.css`: ADD right after the `.bottom-right{...}` rule:
+```css
+.action-bar{bottom:64px;right:12px;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100% - 24px)}
+.count{font-size:11px;color:var(--muted);padding:0 6px;white-space:nowrap}
+.lasso{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+.lasso polyline{fill:rgba(74,63,208,.12);stroke:#4a3fd0;stroke-width:1.5;stroke-dasharray:5 4}
+```
+
+## STEP 7 — Version strings (Build 1.0)
+- `package.json`: `"version": "1.0.0"`
+- `index.html`: `<title>Feather Android · Build 1.0</title>`
+- `src/ui/Header.tsx`: `Android · 1.0` and `feather-android-build-10.png`
+- `src/ui/BrushPanel.tsx`: `Build 1.0 · Tablet-first prototype`
+
+## STEP 8 — README.md (docs only)
+- First line: `# Feather Android · Build 1.0`.
+- Add a section "## Select dan Transform (Build 1.0)" summarizing features A-D above (3-6 lines).
+- In "Yang belum dikerjakan" remove nothing except add: "Gizmo/joystick sumbu untuk transformasi, Group, ekspor GLTF/OBJ."
+
+Then run `npm run typecheck`.
+
+---
+
+## ACCEPTANCE TESTS (manual, on tablet)
+1. Select tool: tap a stroke -> it turns purple, a bounding box appears, ActionBar shows "1 selected". Tap it again -> deselected. Tap empty space -> selection cleared.
+2. Drag a lasso around several strokes -> dashed lasso visible while dragging; those strokes are added to the selection.
+3. Move: toggle Move, drag -> live preview; release. One Undo returns everything to the original position; Redo reapplies.
+4. Rotate and Scale behave the same (Scale also changes line thickness). Selecting nothing disables the buttons.
+5. Mirror stroke (draw with Mirror on) -> Move it: both halves move together. After release they are two independent strokes; one Undo restores the original single mirrored stroke.
+6. Dup: copies appear in place and become the selection (turn purple); Move drags them away. Sym: copies mirrored across X=0.
+7. Del removes the selection; Undo restores it.
+8. Switching to the Brush tool clears the selection (no purple strokes left).
+9. With Move active and a stylus seen, finger orbit still works (fingers navigate, stylus transforms).
+10. Save, Clear strokes, Open: transformed/duplicated strokes persist. Old 0.6-0.9 files still load.
+
+## NOT IN SCOPE
+Axis gizmo/joystick handles, per-point selection, selecting guide planes, snapping, copy/paste across projects, Group.

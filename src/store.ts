@@ -7,6 +7,7 @@ import {
   type InputInfo,
   type ToolId,
   type TouchMode,
+  type TransformMode,
 } from './engine/types';
 
 export interface UIState {
@@ -20,6 +21,7 @@ export interface UIState {
   guide: GuideType;
   guideDraw: boolean;
   ortho: boolean;
+  transform: TransformMode | null;
   gridVisible: boolean;
   guideVisible: boolean;
   history: HistoryInfo;
@@ -36,6 +38,7 @@ export interface UIState {
   setGuide: (guide: GuideType) => void;
   setGuideDraw: (on: boolean) => void;
   toggleOrtho: () => void;
+  setTransform: (mode: TransformMode | null) => void;
   toggleGrid: () => void;
   toggleGuide: () => void;
   setHistory: (info: HistoryInfo) => void;
@@ -55,9 +58,10 @@ export const useUI = create<UIState>((set) => ({
   guide: 'plane',
   guideDraw: false,
   ortho: false,
+  transform: null,
   gridVisible: true,
   guideVisible: true,
-  history: { strokeCount: 0, canUndo: false, canRedo: false },
+  history: { strokeCount: 0, canUndo: false, canRedo: false, selectionCount: 0 },
   toastText: '',
   toastVisible: false,
 
@@ -71,6 +75,7 @@ export const useUI = create<UIState>((set) => ({
   setGuide: (guide) => set({ guide }),
   setGuideDraw: (guideDraw) => set({ guideDraw }),
   toggleOrtho: () => set((s) => ({ ortho: !s.ortho })),
+  setTransform: (transform) => set({ transform }),
   toggleGrid: () => set((s) => ({ gridVisible: !s.gridVisible })),
   toggleGuide: () => set((s) => ({ guideVisible: !s.guideVisible })),
   setHistory: (history) => set({ history }),

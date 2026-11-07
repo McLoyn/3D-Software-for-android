@@ -1,6 +1,6 @@
 import type { Command } from './History';
-import type { StrokeLayer } from './StrokeLayer';
 import type { Guides } from './Guides';
+import type { StrokeLayer } from './StrokeLayer';
 import type { GuidePlaneData, StrokeData } from './types';
 
 export class AddStrokeCommand implements Command {
@@ -36,6 +36,29 @@ export class RemoveStrokeCommand implements Command {
 
   undo(): void {
     this.layer.add(this.stroke);
+  }
+}
+
+/** Mengganti sekumpulan goresan sekaligus (transformasi, duplikat, hapus). Satu langkah undo. */
+export class ReplaceStrokesCommand implements Command {
+  private readonly layer: StrokeLayer;
+  private readonly before: StrokeData[];
+  private readonly after: StrokeData[];
+
+  constructor(layer: StrokeLayer, before: StrokeData[], after: StrokeData[]) {
+    this.layer = layer;
+    this.before = before;
+    this.after = after;
+  }
+
+  do(): void {
+    for (const s of this.before) this.layer.remove(s.id);
+    for (const s of this.after) this.layer.add(s);
+  }
+
+  undo(): void {
+    for (const s of this.after) this.layer.remove(s.id);
+    for (const s of this.before) this.layer.add(s);
   }
 }
 

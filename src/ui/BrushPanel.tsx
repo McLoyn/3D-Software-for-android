@@ -89,7 +89,7 @@ export function BrushPanel() {
       </div>
 
       <div className="note">
-         Build 0.9 · Tablet-first prototype
+        Build 1.0 · Tablet-first prototype
         <br />
         Pressure uses Pointer Events. Stylus pressure depends on browser, device and pen support.
         This build is a web prototype, not a native APK.

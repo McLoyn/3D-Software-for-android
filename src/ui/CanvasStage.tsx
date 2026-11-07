@@ -6,6 +6,7 @@ import { useUI, type UIState } from '../store';
 export function CanvasStage() {
   const stageRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const lassoRef = useRef<SVGPolylineElement>(null);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -22,6 +23,9 @@ export function CanvasStage() {
       ui.setGuideDraw(false);
       ui.showToast(created ? 'Guide created' : 'Line too short or parallel to surface');
     };
+    engine.onLasso = (points) => {
+      lassoRef.current?.setAttribute('points', points ? points.map((p) => `${p.x},${p.y}`).join(' ') : '');
+    };
     setEngine(engine);
 
     // Store UI -> engine. Setter engine bersifat idempoten, jadi aman dipanggil setiap perubahan.
@@ -34,6 +38,7 @@ export function CanvasStage() {
       engine.setGuide(s.guide);
       engine.setGuideDraw(s.guideDraw);
       engine.setOrtho(s.ortho);
+      engine.setTransformMode(s.transform);
       engine.setGridVisible(s.gridVisible);
       engine.setGuideVisible(s.guideVisible);
     };
@@ -55,6 +60,9 @@ export function CanvasStage() {
   return (
     <main id="stage" ref={stageRef}>
       <canvas id="view" ref={canvasRef} />
+      <svg className="lasso">
+        <polyline ref={lassoRef} points="" />
+      </svg>
       <div id="toast" style={{ opacity: toastVisible ? 1 : 0 }}>
         {toastText}
       </div>

@@ -6,6 +6,7 @@ import {
   BatchCommand,
   RemoveGuideCommand,
   RemoveStrokeCommand,
+  ReplaceStrokesCommand,
 } from './commands';
 import { Guides } from './Guides';
 import { History, type Command } from './History';
@@ -24,6 +25,7 @@ import {
   type StrokeData,
   type ToolId,
   type TouchMode,
+  type TransformMode,
   type Vec3Tuple,
   type ViewId,
 } from './types';
@@ -39,6 +41,30 @@ interface SurfaceHit {
   normal: THREE.Vector3;
   surface: number;
 }
+
+interface PxPoint {
+  x: number;
+  y: number;
+}
+
+/** Gerakan kurang dari ini (piksel) dianggap ketukan, bukan lasso. */
+const TAP_SLOP = 10;
+/** Radius pencarian goresan terdekat saat ketuk (piksel). */
+const TAP_PICK_RADIUS = 28;
+const ROTATE_SPEED = 0.01;
+const SCALE_SPEED = 0.005;
+
+/** Uji titik di dalam poligon (ray casting). */
+const inPolygon = (p: PxPoint, poly: PxPoint[]): boolean => {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    const crosses = a.y > p.y !== b.y > p.y;
+    if (crosses && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+};
 
 type StrokeStyle = Omit<StrokeData, 'id' | 'points' | 'pressures'>;
 
@@ -56,6 +82,8 @@ export class Engine {
   onInput?: (info: InputInfo) => void;
   /** Dipanggil setelah goresan pada mode Draw 3D Guide selesai. created=false bila garis tak valid. */
   onGuideDrawEnd?: (created: boolean) => void;
+  /** Titik lasso (piksel kanvas) saat memilih; null saat selesai. Dipakai untuk overlay. */
+  onLasso?: (points: PxPoint[] | null) => void;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly stage: HTMLElement;
@@ -116,6 +144,26 @@ export class Engine {
   private eraseStartX = 0;
   private eraseStartY = 0;
 
+  private readonly selectionBox = new THREE.Box3Helper(new THREE.Box3(), 0x4a3fd0);
+  private selecting = false;
+  private selectPointerId = -1;
+  private lasso: PxPoint[] = [];
+  private lassoLength = 0;
+  private transformMode: TransformMode | null = null;
+  private transforming = false;
+  private transformPointerId = -1;
+  private transformStartX = 0;
+  private transformStartY = 0;
+  private transformMoved = false;
+  private transformScale = 1;
+  private readonly transformPivot = new THREE.Vector3();
+  private readonly transformMatrix = new THREE.Matrix4();
+
+  /** True bila ada gestur pointer yang sedang berjalan (gambar/hapus/pilih/transformasi). */
+  private get busy(): boolean {
+    return this.drawing || this.erasing || this.selecting || this.transforming;
+  }
+
   constructor(canvas: HTMLCanvasElement, stage: HTMLElement) {
     this.canvas = canvas;
     this.stage = stage;
@@ -149,6 +197,9 @@ export class Engine {
     this.grid = new THREE.GridHelper(12, 24, 0xaeb3c4, 0xd0d3de);
     this.scene.add(this.grid);
     this.scene.add(this.guides.root, this.layer.root);
+    this.selectionBox.visible = false;
+    this.selectionBox.frustumCulled = false;
+    this.scene.add(this.selectionBox);
 
     this.history.onChange = () => this.emit();
 
@@ -172,6 +223,11 @@ export class Engine {
 
   setTool(tool: ToolId): void {
     this.tool = tool;
+    if (tool !== 'select' && this.layer.selectionCount > 0) this.setSelection([]);
+  }
+
+  setTransformMode(mode: TransformMode | null): void {
+    this.transformMode = mode;
   }
 
   setTouchMode(mode: TouchMode): void {
@@ -195,13 +251,13 @@ export class Engine {
     this.guides.setType(type);
     this.invalidate();
   }
-  
+
   setGridVisible(visible: boolean): void {
     if (this.grid.visible === visible) return;
     this.grid.visible = visible;
     this.invalidate();
   }
-  
+
   setGuideVisible(visible: boolean): void {
     if (this.guides.root.visible === visible) return;
     this.guides.setVisible(visible);
@@ -245,6 +301,32 @@ export class Engine {
     this.applyCameraSize();
     this.controls.update();
     this.invalidate();
+  }
+
+  clearSelection(): void {
+    this.setSelection([]);
+  }
+
+  /** Duplikat di tempat; salinan menjadi seleksi. symmetric = cerminkan pada bidang X=0 (goresan mirror dilewati). */
+  duplicateSelection(symmetric: boolean): void {
+    const identity = new THREE.Matrix4();
+    const copies: StrokeData[] = [];
+    for (const s of this.selectedStrokes()) {
+      if (symmetric) {
+        if (!s.mirror) copies.push(this.copyStroke(s, this.nextId++, identity, 1, true, false));
+      } else {
+        copies.push(this.copyStroke(s, this.nextId++, identity, 1, false, s.mirror));
+      }
+    }
+    if (copies.length === 0) return;
+    this.history.execute(new ReplaceStrokesCommand(this.layer, [], copies));
+    this.setSelection(copies.map((s) => s.id));
+  }
+
+  deleteSelection(): void {
+    const before = this.selectedStrokes();
+    if (before.length === 0) return;
+    this.history.execute(new ReplaceStrokesCommand(this.layer, before, []));
   }
 
   undo(): void {
@@ -318,15 +400,18 @@ export class Engine {
     this.guides.dispose();
     this.grid.geometry.dispose();
     (this.grid.material as THREE.Material).dispose();
+    this.selectionBox.geometry.dispose();
+    (this.selectionBox.material as THREE.Material).dispose();
     this.renderer.dispose();
     this.onChange = undefined;
     this.onInput = undefined;
+    this.onLasso = undefined;
   }
 
   // ------------------------------------------------------------------- input
 
   /** Apa yang dilakukan sebuah pointer: menavigasi kamera, menggambar, atau menghapus. */
-  private modeFor(e: PointerEvent): 'navigate' | 'draw' | 'erase' {
+  private modeFor(e: PointerEvent): 'navigate' | 'draw' | 'erase' | 'select' | 'transform' {
     // Tombol penghapus fisik pada pena selalu menghapus, apa pun tool-nya.
     if (e.pointerType === 'pen' && (e.buttons & 32) !== 0) return 'erase';
     const tool = this.tool;
@@ -338,6 +423,9 @@ export class Engine {
         this.touchMode === 'draw' || (this.touchMode === 'auto' && !this.penSeen);
       if (!fingerFollowsTool) return 'navigate';
     }
+    if (tool === 'select') {
+      return this.transformMode !== null && this.layer.selectionCount > 0 ? 'transform' : 'select';
+    }
     return tool;
   }
 
@@ -345,15 +433,23 @@ export class Engine {
     if (e.pointerType === 'pen') this.penSeen = true;
     this.reportInput(e, true);
     // Saat goresan sedang dibuat, semua pointer lain (mis. telapak tangan) tidak boleh menggerakkan kamera.
-    this.controls.enabled = !this.drawing && !this.erasing && this.modeFor(e) === 'navigate';
+    this.controls.enabled = !this.busy && this.modeFor(e) === 'navigate';
   };
 
   private readonly onPointerDown = (e: PointerEvent): void => {
-    if (this.drawing || this.erasing) return;
+    if (this.busy) return;
     const mode = this.modeFor(e);
     if (mode === 'navigate') return;
     if (mode === 'erase') {
       this.beginErase(e);
+      return;
+    }
+    if (mode === 'select') {
+      this.beginSelect(e);
+      return;
+    }
+    if (mode === 'transform') {
+      this.beginTransform(e);
       return;
     }
 
@@ -387,6 +483,14 @@ export class Engine {
       for (const sample of coalesced.length > 0 ? coalesced : [e]) this.eraseSample(sample);
       return;
     }
+    if (this.selecting && e.pointerId === this.selectPointerId) {
+      this.selectMove(e);
+      return;
+    }
+    if (this.transforming && e.pointerId === this.transformPointerId) {
+      this.transformMove(e);
+      return;
+    }
     if (!this.drawing || e.pointerId !== this.activePointerId || !this.draftStyle) return;
 
     // Chrome menggabungkan beberapa sampel stylus ke satu event; ambil semuanya agar garis dan
@@ -395,9 +499,9 @@ export class Engine {
     const samples = coalesced.length > 0 ? coalesced : [e];
 
     let added = false;
-        for (const sample of samples) {
-          if (this.addSample(sample)) added = true;
-        }
+    for (const sample of samples) {
+      if (this.addSample(sample)) added = true;
+    }
     if (!added) return;
     this.previewDirty = true;
   };
@@ -415,7 +519,7 @@ export class Engine {
     this.draftPressures.push(this.pressureOf(e));
     this.draftTimes.push(e.timeStamp - this.draftStartTime);
     return true;
-  };
+  }
 
   /** Mengirim ringkasan input ke indikator debug (hanya saat diaktifkan). */
   private reportInput(e: PointerEvent, force: boolean): void {
@@ -452,6 +556,14 @@ export class Engine {
     this.reportInput(e, true);
     if (this.erasing && e.pointerId === this.erasePointerId) {
       this.endErase(e);
+      return;
+    }
+    if (this.selecting && e.pointerId === this.selectPointerId) {
+      this.endSelect(e);
+      return;
+    }
+    if (this.transforming && e.pointerId === this.transformPointerId) {
+      this.endTransform(e);
       return;
     }
     if (!this.drawing || e.pointerId !== this.activePointerId) return;
@@ -548,6 +660,220 @@ export class Engine {
     this.erasePlane = null;
   }
 
+  // ----------------------------------------------------------- select / transform
+
+  private canvasPoint(e: PointerEvent): PxPoint {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  /** Titik goresan dalam piksel kanvas (titik di belakang kamera dilewati; sisi cermin ikut dihitung). */
+  private strokePx(stroke: StrokeData): PxPoint[] {
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const v = new THREE.Vector3();
+    const out: PxPoint[] = [];
+    for (const flip of stroke.mirror ? [false, true] : [false]) {
+      for (const [x, y, z] of stroke.points) {
+        v.set(flip ? -x : x, y, z).project(this.camera);
+        if (v.z > 1) continue;
+        out.push({ x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h });
+      }
+    }
+    return out;
+  }
+
+  private selectedStrokes(): StrokeData[] {
+    return this.layer
+      .selection.map((id) => this.layer.get(id))
+      .filter((s): s is StrokeData => s !== undefined);
+  }
+
+  private setSelection(ids: Iterable<number>): void {
+    this.layer.setSelection(ids);
+    this.emit();
+  }
+
+  private updateSelectionBox(): void {
+    const box = this.layer.selectionBounds();
+    if (box.isEmpty()) {
+      this.selectionBox.visible = false;
+      return;
+    }
+    this.selectionBox.box.copy(box);
+    this.selectionBox.visible = true;
+  }
+
+  private beginSelect(e: PointerEvent): void {
+    this.selecting = true;
+    this.selectPointerId = e.pointerId;
+    this.canvas.setPointerCapture(e.pointerId);
+    this.lasso = [this.canvasPoint(e)];
+    this.lassoLength = 0;
+  }
+
+  private selectMove(e: PointerEvent): void {
+    const p = this.canvasPoint(e);
+    const last = this.lasso[this.lasso.length - 1];
+    const d = Math.hypot(p.x - last.x, p.y - last.y);
+    if (d < 3) return;
+    this.lassoLength += d;
+    this.lasso.push(p);
+    if (this.lassoLength >= TAP_SLOP) this.onLasso?.(this.lasso);
+  }
+
+  private endSelect(e: PointerEvent): void {
+    this.selecting = false;
+    try {
+      this.canvas.releasePointerCapture(e.pointerId);
+    } catch {
+      // pointer capture sudah dilepas oleh browser
+    }
+    this.onLasso?.(null);
+    const path = this.lasso;
+    this.lasso = [];
+    if (this.lassoLength < TAP_SLOP) {
+      this.tapSelect(path[0]);
+    } else if (path.length >= 3) {
+      this.lassoSelect(path);
+    }
+  }
+
+  /** Ketuk: toggle goresan terdekat; ketuk kosong: bersihkan seleksi. */
+  private tapSelect(p: PxPoint): void {
+    let best: number | null = null;
+    let bestDist = TAP_PICK_RADIUS;
+    for (const s of this.layer.all()) {
+      for (const q of this.strokePx(s)) {
+        const d = Math.hypot(q.x - p.x, q.y - p.y);
+        if (d < bestDist) {
+          bestDist = d;
+          best = s.id;
+        }
+      }
+    }
+    if (best === null) {
+      this.setSelection([]);
+      return;
+    }
+    const ids = new Set(this.layer.selection);
+    if (ids.has(best)) ids.delete(best);
+    else ids.add(best);
+    this.setSelection(ids);
+  }
+
+  /** Lasso: tambahkan goresan yang punya minimal satu titik di dalam poligon. */
+  private lassoSelect(poly: PxPoint[]): void {
+    const ids = new Set(this.layer.selection);
+    for (const s of this.layer.all()) {
+      if (this.strokePx(s).some((q) => inPolygon(q, poly))) ids.add(s.id);
+    }
+    this.setSelection(ids);
+  }
+
+  /** Ukuran satu piksel layar dalam satuan dunia pada kedalaman titik tertentu. */
+  private worldPerPixel(at: THREE.Vector3): number {
+    const height = Math.max(1, this.canvas.clientHeight);
+    if (this.camera instanceof THREE.OrthographicCamera) {
+      return (this.camera.top - this.camera.bottom) / this.camera.zoom / height;
+    }
+    const dist = this.camera.position.distanceTo(at);
+    return (2 * dist * Math.tan(THREE.MathUtils.degToRad(this.perspCamera.fov / 2))) / height;
+  }
+
+  private beginTransform(e: PointerEvent): void {
+    const box = this.layer.selectionBounds();
+    if (box.isEmpty() || this.transformMode === null) return;
+    this.transforming = true;
+    this.transformPointerId = e.pointerId;
+    this.canvas.setPointerCapture(e.pointerId);
+    box.getCenter(this.transformPivot);
+    this.transformStartX = e.clientX;
+    this.transformStartY = e.clientY;
+    this.transformMatrix.identity();
+    this.transformScale = 1;
+    this.transformMoved = false;
+    this.camera.updateMatrixWorld();
+  }
+
+  private transformMove(e: PointerEvent): void {
+    const dx = e.clientX - this.transformStartX;
+    const dy = e.clientY - this.transformStartY;
+    if (!this.transformMoved && Math.hypot(dx, dy) < 3) return;
+    this.transformMoved = true;
+
+    const p = this.transformPivot;
+    const m = this.transformMatrix.identity();
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).normalize();
+    const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1).normalize();
+    let scale = 1;
+
+    if (this.transformMode === 'move') {
+      const k = this.worldPerPixel(p);
+      const t = right.multiplyScalar(dx * k).addScaledVector(up, -dy * k);
+      m.makeTranslation(t.x, t.y, t.z);
+    } else if (this.transformMode === 'rotate') {
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * ROTATE_SPEED);
+      q.premultiply(new THREE.Quaternion().setFromAxisAngle(right, dy * ROTATE_SPEED));
+      m.makeTranslation(p.x, p.y, p.z)
+        .multiply(new THREE.Matrix4().makeRotationFromQuaternion(q))
+        .multiply(new THREE.Matrix4().makeTranslation(-p.x, -p.y, -p.z));
+    } else if (this.transformMode === 'scale') {
+      scale = THREE.MathUtils.clamp(Math.exp(-dy * SCALE_SPEED), 0.05, 20);
+      m.makeTranslation(p.x, p.y, p.z)
+        .multiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+        .multiply(new THREE.Matrix4().makeTranslation(-p.x, -p.y, -p.z));
+    }
+    this.transformScale = scale;
+
+    this.layer.setPreviewMatrix(this.layer.selection, m);
+    this.updateSelectionBox();
+    this.invalidate();
+  }
+
+  private endTransform(e: PointerEvent): void {
+    this.transforming = false;
+    try {
+      this.canvas.releasePointerCapture(e.pointerId);
+    } catch {
+      // pointer capture sudah dilepas oleh browser
+    }
+    this.layer.setPreviewMatrix(this.layer.selection, null);
+    if (this.transformMoved) this.commitTransform();
+    this.updateSelectionBox();
+    this.invalidate();
+  }
+
+  /** Menanamkan transformMatrix ke data goresan terpilih sebagai satu langkah undo. */
+  private commitTransform(): void {
+    const before = this.selectedStrokes();
+    const after: StrokeData[] = [];
+    for (const s of before) {
+      after.push(this.copyStroke(s, s.id, this.transformMatrix, this.transformScale, false, false));
+      // Goresan mirror: sisi cerminnya dijadikan goresan sendiri agar ikut bertransformasi.
+      if (s.mirror) {
+        after.push(this.copyStroke(s, this.nextId++, this.transformMatrix, this.transformScale, true, false));
+      }
+    }
+    if (after.length === 0) return;
+    this.history.execute(new ReplaceStrokesCommand(this.layer, before, after));
+    this.setSelection(after.map((s) => s.id));
+  }
+
+  /** Salinan goresan dengan titik ditransformasi (flip = cerminkan X dulu) dan radius diskalakan. */
+  private copyStroke(
+    s: StrokeData,
+    id: number,
+    m: THREE.Matrix4,
+    scale: number,
+    flip: boolean,
+    mirror: boolean,
+  ): StrokeData {
+    const v = new THREE.Vector3();
+    const points = s.points.map(([x, y, z]) => toTuple(v.set(flip ? -x : x, y, z).applyMatrix4(m)));
+    return { ...s, id, points, radius: s.radius * scale, mirror };
+  }
+
   private setRay(e: PointerEvent): void {
     const rect = this.canvas.getBoundingClientRect();
     this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -586,8 +912,6 @@ export class Engine {
     return { id: this.nextPlaneId++, origin: toTuple(mid), normal: toTuple(normal.normalize()) };
   }
 
-  
-
   // ---------------------------------------------------------------- internals
   private applyCameraSize(): void {
     const { width, height } = this.stageSize();
@@ -601,7 +925,7 @@ export class Engine {
     this.orthoCamera.bottom = -h;
     this.orthoCamera.updateProjectionMatrix();
   }
-  
+
   private invalidate(): void {
     this.needsRender = true;
   }
@@ -622,29 +946,31 @@ export class Engine {
 
   private emit(): void {
     this.invalidate();
+    this.updateSelectionBox();
     this.onChange?.({
       strokeCount: this.layer.count,
       canUndo: this.history.canUndo,
       canRedo: this.history.canRedo,
+      selectionCount: this.layer.selectionCount,
     });
   }
 
   private readonly loop = (): void => {
-  this.frame = requestAnimationFrame(this.loop);
-  const moved = this.controls.update(); // true saat kamera bergerak (termasuk damping)
-  if (this.previewDirty && this.draftStyle) {
-    this.previewDirty = false;
-    this.layer.setPreview({
-      ...this.draftStyle,
-      points: this.draftPoints,
-      pressures: this.draftPressures,
-      times: this.draftTimes,
-    });
-    this.needsRender = true;
-  }
-  if (moved || this.needsRender) {
-    this.needsRender = false;
-    this.renderer.render(this.scene, this.camera);
-  }
-};
+    this.frame = requestAnimationFrame(this.loop);
+    const moved = this.controls.update(); // true saat kamera bergerak (termasuk damping)
+    if (this.previewDirty && this.draftStyle) {
+      this.previewDirty = false;
+      this.layer.setPreview({
+        ...this.draftStyle,
+        points: this.draftPoints,
+        pressures: this.draftPressures,
+        times: this.draftTimes,
+      });
+      this.needsRender = true;
+    }
+    if (moved || this.needsRender) {
+      this.needsRender = false;
+      this.renderer.render(this.scene, this.camera);
+    }
+  };
 }
