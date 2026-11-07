@@ -10,9 +10,42 @@ import {
   type TransformMode,
 } from './engine/types';
 
+const PRESETS_KEY = 'feather-android-presets';
+export const MAX_PRESETS = 8;
+
+const isBrush = (v: unknown): v is BrushSettings => {
+  if (typeof v !== 'object' || v === null) return false;
+  const b = v as Record<string, unknown>;
+  return (
+    typeof b.color === 'string' &&
+    ['radius', 'pressure', 'opacity', 'stabilize'].every(
+      (k) => typeof b[k] === 'number' && Number.isFinite(b[k]),
+    )
+  );
+};
+
+function loadPresets(): BrushSettings[] {
+  try {
+    const raw = localStorage.getItem(PRESETS_KEY);
+    const data: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(data) ? data.filter(isBrush).slice(0, MAX_PRESETS) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistPresets(list: BrushSettings[]): void {
+  try {
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(list));
+  } catch {
+    // penyimpanan tidak tersedia; preset hanya hidup selama sesi
+  }
+}
+
 export interface UIState {
   tool: ToolId;
   brush: BrushSettings;
+  presets: BrushSettings[];
   mirror: boolean;
   touchMode: TouchMode;
   settingsOpen: boolean;
@@ -34,6 +67,9 @@ export interface UIState {
   setInputDebug: (on: boolean) => void;
   setInput: (info: InputInfo) => void;
   setBrush: (patch: Partial<BrushSettings>) => void;
+  savePreset: () => void;
+  removePreset: (index: number) => void;
+  applyPreset: (index: number) => void;
   toggleMirror: () => void;
   setGuide: (guide: GuideType) => void;
   setGuideDraw: (on: boolean) => void;
@@ -50,6 +86,7 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined;
 export const useUI = create<UIState>((set) => ({
   tool: 'draw',
   brush: { ...DEFAULT_BRUSH },
+  presets: loadPresets(),
   mirror: false,
   touchMode: 'auto',
   settingsOpen: false,
@@ -71,6 +108,20 @@ export const useUI = create<UIState>((set) => ({
   setInputDebug: (inputDebug) => set({ inputDebug, input: null }),
   setInput: (input) => set({ input }),
   setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
+  savePreset: () =>
+    set((s) => {
+      if (s.presets.length >= MAX_PRESETS) return s;
+      const presets = [...s.presets, { ...s.brush }];
+      persistPresets(presets);
+      return { presets };
+    }),
+  removePreset: (index) =>
+    set((s) => {
+      const presets = s.presets.filter((_, i) => i !== index);
+      persistPresets(presets);
+      return { presets };
+    }),
+  applyPreset: (index) => set((s) => (s.presets[index] ? { brush: { ...s.presets[index] } } : s)),
   toggleMirror: () => set((s) => ({ mirror: !s.mirror })),
   setGuide: (guide) => set({ guide }),
   setGuideDraw: (guideDraw) => set({ guideDraw }),

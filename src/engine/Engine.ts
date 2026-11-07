@@ -53,6 +53,8 @@ const TAP_SLOP = 10;
 const TAP_PICK_RADIUS = 28;
 const ROTATE_SPEED = 0.01;
 const SCALE_SPEED = 0.005;
+/** Faktor penghalusan maksimum Stable Stroke (saat slider 100). */
+const STABILIZE_MAX = 0.75;
 
 /** Uji titik di dalam poligon (ray casting). */
 const inPolygon = (p: PxPoint, poly: PxPoint[]): boolean => {
@@ -84,6 +86,8 @@ export class Engine {
   onGuideDrawEnd?: (created: boolean) => void;
   /** Titik lasso (piksel kanvas) saat memilih; null saat selesai. Dipakai untuk overlay. */
   onLasso?: (points: PxPoint[] | null) => void;
+  /** Dipanggil saat Eyedropper mengambil pengaturan kuas dari sebuah goresan. */
+  onBrushPicked?: (patch: Partial<BrushSettings>) => void;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly stage: HTMLElement;
@@ -156,6 +160,9 @@ export class Engine {
   private transformStartY = 0;
   private transformMoved = false;
   private transformScale = 1;
+  /** Posisi pointer yang sudah dihaluskan (Stable Stroke), dalam koordinat klien. */
+  private smoothX = 0;
+  private smoothY = 0;
   private readonly transformPivot = new THREE.Vector3();
   private readonly transformMatrix = new THREE.Matrix4();
 
@@ -329,6 +336,21 @@ export class Engine {
     this.history.execute(new ReplaceStrokesCommand(this.layer, before, []));
   }
 
+  /** Terapkan kuas saat ini (warna, ukuran, opacity, tekanan) ke goresan terpilih. */
+  applyBrushToSelection(): void {
+    const before = this.selectedStrokes();
+    if (before.length === 0) return;
+    const after = before.map((s) => ({
+      ...s,
+      color: this.brush.color,
+      radius: this.brush.radius / 1000,
+      opacity: this.brush.opacity / 100,
+      pressureResponse: this.brush.pressure / 100,
+    }));
+    this.history.execute(new ReplaceStrokesCommand(this.layer, before, after));
+    this.setSelection(after.map((s) => s.id));
+  }
+
   undo(): void {
     this.history.undo();
   }
@@ -406,12 +428,13 @@ export class Engine {
     this.onChange = undefined;
     this.onInput = undefined;
     this.onLasso = undefined;
+    this.onBrushPicked = undefined;
   }
 
   // ------------------------------------------------------------------- input
 
   /** Apa yang dilakukan sebuah pointer: menavigasi kamera, menggambar, atau menghapus. */
-  private modeFor(e: PointerEvent): 'navigate' | 'draw' | 'erase' | 'select' | 'transform' {
+  private modeFor(e: PointerEvent): 'navigate' | 'draw' | 'erase' | 'select' | 'transform' | 'pick' {
     // Tombol penghapus fisik pada pena selalu menghapus, apa pun tool-nya.
     if (e.pointerType === 'pen' && (e.buttons & 32) !== 0) return 'erase';
     const tool = this.tool;
@@ -448,15 +471,21 @@ export class Engine {
       this.beginSelect(e);
       return;
     }
+    if (mode === 'pick') {
+      this.pickBrushAt(e);
+      return;
+    }
     if (mode === 'transform') {
       this.beginTransform(e);
       return;
     }
 
-    const start = this.hit(e, null);
+    const start = this.hit(e.clientX, e.clientY, null);
     if (!start) return;
     this.draftSurface = start.surface;
     this.draftNormal.copy(start.normal);
+    this.smoothX = e.clientX;
+    this.smoothY = e.clientY;
 
     this.drawing = true;
     this.activePointerId = e.pointerId;
@@ -507,7 +536,11 @@ export class Engine {
   };
 
   private addSample(e: PointerEvent): boolean {
-    const hit = this.hit(e, this.draftSurface);
+    // Stable Stroke: haluskan posisi pointer di layar, lalu tembak ray dari posisi itu.
+    const k = (this.brush.stabilize / 100) * STABILIZE_MAX;
+    this.smoothX += (e.clientX - this.smoothX) * (1 - k);
+    this.smoothY += (e.clientY - this.smoothY) * (1 - k);
+    const hit = this.hit(this.smoothX, this.smoothY, this.draftSurface);
     if (!hit) return false;
     const point = hit.point;
 
@@ -739,8 +772,8 @@ export class Engine {
     }
   }
 
-  /** Ketuk: toggle goresan terdekat; ketuk kosong: bersihkan seleksi. */
-  private tapSelect(p: PxPoint): void {
+  /** Id goresan terdekat dari titik (dalam radius ketuk), atau null. */
+  private nearestStroke(p: PxPoint): number | null {
     let best: number | null = null;
     let bestDist = TAP_PICK_RADIUS;
     for (const s of this.layer.all()) {
@@ -752,6 +785,12 @@ export class Engine {
         }
       }
     }
+    return best;
+  }
+
+  /** Ketuk: toggle goresan terdekat; ketuk kosong: bersihkan seleksi. */
+  private tapSelect(p: PxPoint): void {
+    const best = this.nearestStroke(p);
     if (best === null) {
       this.setSelection([]);
       return;
@@ -760,6 +799,20 @@ export class Engine {
     if (ids.has(best)) ids.delete(best);
     else ids.add(best);
     this.setSelection(ids);
+  }
+
+  /** Eyedropper/Injector: ambil warna, ukuran, opacity, dan tekanan dari goresan terdekat. */
+  private pickBrushAt(e: PointerEvent): void {
+    const id = this.nearestStroke(this.canvasPoint(e));
+    if (id === null) return;
+    const s = this.layer.get(id);
+    if (!s) return;
+    this.onBrushPicked?.({
+      color: s.color,
+      radius: THREE.MathUtils.clamp(Math.round(s.radius * 1000), 5, 100),
+      opacity: THREE.MathUtils.clamp(Math.round(s.opacity * 100), 10, 100),
+      pressure: THREE.MathUtils.clamp(Math.round(s.pressureResponse * 100), 0, 100),
+    });
   }
 
   /** Lasso: tambahkan goresan yang punya minimal satu titik di dalam poligon. */
@@ -875,15 +928,19 @@ export class Engine {
   }
 
   private setRay(e: PointerEvent): void {
+    this.setRayAt(e.clientX, e.clientY);
+  }
+
+  private setRayAt(clientX: number, clientY: number): void {
     const rect = this.canvas.getBoundingClientRect();
-    this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
   }
 
   /** Titik tembak untuk pointer. lock = permukaan yang dikunci (null = bebas memilih). */
-  private hit(e: PointerEvent, lock: number | null): SurfaceHit | null {
-    this.setRay(e);
+  private hit(clientX: number, clientY: number, lock: number | null): SurfaceHit | null {
+    this.setRayAt(clientX, clientY);
     if (lock !== DEFAULT_SURFACE && this.guides.active) {
       const guide = this.guides.intersect(this.raycaster, lock);
       if (guide) return guide;

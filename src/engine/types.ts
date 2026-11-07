@@ -1,4 +1,4 @@
-export type ToolId = 'draw' | 'erase' | 'orbit' | 'select';
+export type ToolId = 'draw' | 'erase' | 'orbit' | 'select' | 'pick';
 export type TransformMode = 'move' | 'rotate' | 'scale';
 export type GuideType = 'plane' | 'sphere' | 'cube';
 export type ViewId = 'front' | 'side' | 'top';
@@ -22,6 +22,8 @@ export interface BrushSettings {
   pressure: number;
   /** 10..100 */
   opacity: number;
+  /** 0..100, seberapa kuat penghalusan pointer (Stable Stroke). */
+  stabilize: number;
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {
@@ -29,6 +31,7 @@ export const DEFAULT_BRUSH: BrushSettings = {
   radius: 12,
   pressure: 70,
   opacity: 100,
+  stabilize: 0,
 };
 
 /** Satu goresan lengkap. Gaya kuas dan mirror disimpan per goresan agar undo/redo konsisten. */
@@ -67,7 +70,7 @@ export interface HistoryInfo {
 }
 
 export const PROJECT_FORMAT = 'feather-android-prototype' as const;
-export const PROJECT_VERSION = '1.0';
+export const PROJECT_VERSION = '1.1';
 
 /** Bidang panduan buatan pengguna (Draw 3D Guide). */
 export interface GuidePlaneData {

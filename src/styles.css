@@ -15,6 +15,11 @@ canvas{width:100%;height:100%;display:block;touch-action:none}
 .count{font-size:11px;color:var(--muted);padding:0 6px;white-space:nowrap}
 .lasso{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
 .lasso polyline{fill:rgba(74,63,208,.12);stroke:#4a3fd0;stroke-width:1.5;stroke-dasharray:5 4}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+.preset{display:flex;align-items:center;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.preset button{border:0;border-radius:0;padding:6px 8px;display:flex;align-items:center;gap:6px}
+.preset .x{padding:6px;color:var(--muted)}
+.dot{width:14px;height:14px;border-radius:50%;border:1px solid var(--line);display:inline-block}
 .left-tools{top:64px;left:12px;max-height:calc(100% - 116px);overflow-y:auto}
 
 button,select{font:inherit;color:var(--text)}

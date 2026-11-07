@@ -1,6 +1,6 @@
 import type { TouchMode } from '../engine/types';
 import { getEngine } from '../engineRef';
-import { useUI } from '../store';
+import { MAX_PRESETS, useUI } from '../store';
 
 /** Lembar pengaturan lanjutan, dibuka dari tombol roda gigi di kanan atas. */
 export function BrushPanel() {
@@ -16,6 +16,10 @@ export function BrushPanel() {
   const setTouchMode = useUI((s) => s.setTouchMode);
   const inputDebug = useUI((s) => s.inputDebug);
   const setInputDebug = useUI((s) => s.setInputDebug);
+  const presets = useUI((s) => s.presets);
+  const savePreset = useUI((s) => s.savePreset);
+  const removePreset = useUI((s) => s.removePreset);
+  const applyPreset = useUI((s) => s.applyPreset);
   const showToast = useUI((s) => s.showToast);
 
   if (!settingsOpen) return null;
@@ -41,6 +45,46 @@ export function BrushPanel() {
           value={brush.pressure}
           onChange={(e) => setBrush({ pressure: Number(e.target.value) })}
         />
+        <label>
+          Stabilizer <span>{brush.stabilize}%</span>
+        </label>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={brush.stabilize}
+          onChange={(e) => setBrush({ stabilize: Number(e.target.value) })}
+        />
+      </div>
+
+      <div className="group">
+        <h3>Presets</h3>
+        <div className="presets">
+          {presets.map((p, i) => (
+            <div key={i} className="preset">
+              <button title={`Size ${p.radius} · ${p.opacity}%`} onClick={() => applyPreset(i)}>
+                <span className="dot" style={{ background: p.color }} />
+                {p.radius}
+              </button>
+              <button className="x" title="Delete preset" onClick={() => removePreset(i)}>
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          style={{ width: '100%', marginTop: 8 }}
+          onClick={() => {
+            if (presets.length >= MAX_PRESETS) {
+              showToast(`Preset full (max ${MAX_PRESETS})`);
+              return;
+            }
+            savePreset();
+            showToast('Preset saved');
+          }}
+        >
+          Save current brush
+        </button>
       </div>
 
       <div className="group">
@@ -89,7 +133,7 @@ export function BrushPanel() {
       </div>
 
       <div className="note">
-        Build 1.0 · Tablet-first prototype
+        Build 1.1 · Tablet-first prototype
         <br />
         Pressure uses Pointer Events. Stylus pressure depends on browser, device and pen support.
         This build is a web prototype, not a native APK.

@@ -6,6 +6,7 @@ const TOOLS: { id: ToolId; icon: string; title: string }[] = [
   { id: 'erase', icon: '⌫', title: 'Eraser' },
   { id: 'orbit', icon: '◉', title: 'Orbit' },
   { id: 'select', icon: '⬚', title: 'Select' },
+  { id: 'pick', icon: '◈', title: 'Eyedropper: tap a stroke to copy its brush' },
 ];
 
 /** Panel alat di kiri: alat, warna, ukuran, dan opasitas kuas. */

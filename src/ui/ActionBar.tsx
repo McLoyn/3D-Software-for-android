@@ -14,6 +14,7 @@ export function ActionBar() {
   const transform = useUI((s) => s.transform);
   const count = useUI((s) => s.history.selectionCount);
   const setTransform = useUI((s) => s.setTransform);
+  const showToast = useUI((s) => s.showToast);
 
   if (tool !== 'select') return null;
   const none = count === 0;
@@ -38,6 +39,16 @@ export function ActionBar() {
       </button>
       <button disabled={none} title="Duplicate mirrored on X" onClick={() => getEngine()?.duplicateSelection(true)}>
         Sym
+      </button>
+      <button
+        disabled={none}
+        title="Apply current brush to selection"
+        onClick={() => {
+          getEngine()?.applyBrushToSelection();
+          showToast('Brush applied');
+        }}
+      >
+        Brush
       </button>
       <button disabled={none} title="Delete" onClick={() => getEngine()?.deleteSelection()}>
         Del

@@ -26,6 +26,12 @@ export function CanvasStage() {
     engine.onLasso = (points) => {
       lassoRef.current?.setAttribute('points', points ? points.map((p) => `${p.x},${p.y}`).join(' ') : '');
     };
+    engine.onBrushPicked = (patch) => {
+      const ui = useUI.getState();
+      ui.setBrush(patch);
+      ui.setTool('draw');
+      ui.showToast('Brush picked');
+    };
     setEngine(engine);
 
     // Store UI -> engine. Setter engine bersifat idempoten, jadi aman dipanggil setiap perubahan.

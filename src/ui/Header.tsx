@@ -23,7 +23,7 @@ export function Header() {
   const onExport = () => {
     const engine = getEngine();
     if (!engine) return;
-    downloadUrl(engine.exportPNG(), 'feather-android-build-10.png');
+    downloadUrl(engine.exportPNG(), 'feather-android-build-11.png');
     showToast('PNG exported');
   };
 
@@ -45,7 +45,7 @@ export function Header() {
     <header className="pill top-left">
       <div className="brand">
         <b>✦</b>
-        <small>Android · 1.0</small>
+        <small>Android · 1.1</small>
       </div>
       <button disabled={!canUndo} onClick={() => getEngine()?.undo()} title="Undo">
         ↶
