@@ -1,10 +1,12 @@
-import { DEFAULT_BRUSH, type GuideType, type StrokeData, type Vec3Tuple } from './types';
+import { DEFAULT_BRUSH, type GuideType, type StrokeData, type Vec3Tuple, type GuidePlaneData } from './types';
 
 export type NewStroke = Omit<StrokeData, 'id'>;
+export type NewPlane = Omit<GuidePlaneData, 'id'>;
 
 export interface ParsedProject {
   guide: GuideType;
   strokes: NewStroke[];
+  planes: NewPlane[];
 }
 
 const GUIDES: GuideType[] = ['plane', 'sphere', 'cube'];
@@ -13,8 +15,8 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 const isVec3 = (v: unknown): v is Vec3Tuple => Array.isArray(v) && v.length === 3 && v.every(isNum);
 
 /**
- * Membaca berkas proyek (.fthr.json). Menerima format Build 0.2 (tanpa gaya kuas per goresan)
- * maupun 0.3. Melempar Error bila berkas tidak valid; goresan rusak dilewati.
+ * Membaca berkas proyek (.fthr.json). Menerima format Build 0.2 sampai 0.8 (planes opsional).
+ * Melempar Error bila berkas tidak valid; goresan rusak dilewati.
  */
 export function parseProject(raw: unknown): ParsedProject {
   if (typeof raw !== 'object' || raw === null) throw new Error('Invalid project file');
@@ -61,5 +63,19 @@ export function parseProject(raw: unknown): ParsedProject {
     });
   }
 
-  return { guide, strokes };
+  const planes: NewPlane[] = [];
+  if (Array.isArray(obj.planes)) {
+    for (const item of obj.planes as unknown[]) {
+      if (typeof item !== 'object' || item === null) continue;
+      const p = item as Record<string, unknown>;
+      if (!isVec3(p.origin) || !isVec3(p.normal)) continue;
+      const len = Math.hypot(p.normal[0], p.normal[1], p.normal[2]);
+      if (len < 1e-6) continue;
+      planes.push({
+        origin: p.origin,
+        normal: [p.normal[0] / len, p.normal[1] / len, p.normal[2] / len],
+      });
+    }
+  }
+  return { guide, strokes, planes };
 }

@@ -12,9 +12,12 @@ export function GuideBar() {
   const guide = useUI((s) => s.guide);
   const mirror = useUI((s) => s.mirror);
   const settingsOpen = useUI((s) => s.settingsOpen);
+  const guideDraw = useUI((s) => s.guideDraw);
   const setGuide = useUI((s) => s.setGuide);
+  const setGuideDraw = useUI((s) => s.setGuideDraw);
   const toggleMirror = useUI((s) => s.toggleMirror);
   const toggleSettings = useUI((s) => s.toggleSettings);
+  const showToast = useUI((s) => s.showToast);
 
   return (
     <div className="pill top-right">
@@ -28,6 +31,16 @@ export function GuideBar() {
           {g.icon}
         </button>
       ))}
+      <button
+        className={guideDraw ? 'active' : ''}
+        title="Draw 3D Guide"
+        onClick={() => {
+          setGuideDraw(!guideDraw);
+          if (!guideDraw) showToast('Draw a line: it becomes a guide plane');
+        }}
+      >
+        ⟂
+      </button>
       <div className="vdivider" />
       <button className={mirror ? 'active' : ''} title="Mirror" onClick={toggleMirror}>
         ⇋

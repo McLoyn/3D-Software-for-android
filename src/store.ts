@@ -18,6 +18,7 @@ export interface UIState {
   inputDebug: boolean;
   input: InputInfo | null;
   guide: GuideType;
+  guideDraw: boolean;
   gridVisible: boolean;
   guideVisible: boolean;
   history: HistoryInfo;
@@ -32,6 +33,7 @@ export interface UIState {
   setBrush: (patch: Partial<BrushSettings>) => void;
   toggleMirror: () => void;
   setGuide: (guide: GuideType) => void;
+  setGuideDraw: (on: boolean) => void;
   toggleGrid: () => void;
   toggleGuide: () => void;
   setHistory: (info: HistoryInfo) => void;
@@ -49,6 +51,7 @@ export const useUI = create<UIState>((set) => ({
   inputDebug: false,
   input: null,
   guide: 'plane',
+  guideDraw: false,
   gridVisible: true,
   guideVisible: true,
   history: { strokeCount: 0, canUndo: false, canRedo: false },
@@ -63,6 +66,7 @@ export const useUI = create<UIState>((set) => ({
   setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
   toggleMirror: () => set((s) => ({ mirror: !s.mirror })),
   setGuide: (guide) => set({ guide }),
+  setGuideDraw: (guideDraw) => set({ guideDraw }),
   toggleGrid: () => set((s) => ({ gridVisible: !s.gridVisible })),
   toggleGuide: () => set((s) => ({ guideVisible: !s.guideVisible })),
   setHistory: (history) => set({ history }),

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { AddStrokeCommand, RemoveStrokeCommand } from './commands';
+import { AddGuideCommand, AddStrokeCommand, BatchCommand, RemoveStrokeCommand } from './commands';
 import { Guides } from './Guides';
 import { History } from './History';
 import { parseProject } from './project';
@@ -10,6 +10,7 @@ import {
   PROJECT_FORMAT,
   PROJECT_VERSION,
   type BrushSettings,
+  type GuidePlaneData,
   type GuideType,
   type HistoryInfo,
   type InputInfo,
@@ -21,6 +22,16 @@ import {
 } from './types';
 
 const MIN_POINT_DISTANCE = 0.018;
+/** Panjang minimum garis (satuan dunia) agar bisa menjadi bidang guide. */
+const MIN_GUIDE_LENGTH = 0.3;
+/** surfaceId untuk bidang gambar default (bukan guide). */
+const DEFAULT_SURFACE = -1;
+
+interface SurfaceHit {
+  point: THREE.Vector3;
+  normal: THREE.Vector3;
+  surface: number;
+}
 
 type StrokeStyle = Omit<StrokeData, 'id' | 'points' | 'pressures'>;
 
@@ -36,6 +47,8 @@ export class Engine {
   onChange?: (info: HistoryInfo) => void;
   /** Dipanggil (dibatasi ~15x/detik) saat indikator input debug aktif. */
   onInput?: (info: InputInfo) => void;
+  /** Dipanggil setelah goresan pada mode Draw 3D Guide selesai. created=false bila garis tak valid. */
+  onGuideDrawEnd?: (created: boolean) => void;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly stage: HTMLElement;
@@ -77,6 +90,11 @@ export class Engine {
   private frame = 0;
   private needsRender = true;
   private previewDirty = false;
+  private guideDraw = false;
+  private nextPlaneId = 1;
+  /** Permukaan tempat goresan dimulai (null = belum ada); goresan tetap terkunci di sini. */
+  private draftSurface: number | null = null;
+  private draftNormal = new THREE.Vector3(0, 0, 1);
 
   constructor(canvas: HTMLCanvasElement, stage: HTMLElement) {
     this.canvas = canvas;
@@ -169,6 +187,10 @@ export class Engine {
     this.invalidate();
   }
 
+  setGuideDraw(on: boolean): void {
+    this.guideDraw = on;
+  }
+
   // ----------------------------------------------------------------- actions
 
   undo(): void {
@@ -181,6 +203,7 @@ export class Engine {
 
   clearStrokes(): void {
     this.layer.clear();
+    this.guides.clearPlanes();
     this.history.clear();
     this.invalidate();
   }
@@ -202,6 +225,7 @@ export class Engine {
       format: PROJECT_FORMAT,
       version: PROJECT_VERSION,
       guide: this.guides.type,
+      planes: this.guides.allPlanes(),
       strokes: this.layer.all(),
     };
   }
@@ -213,6 +237,10 @@ export class Engine {
   loadProject(raw: unknown): { guide: GuideType; count: number } {
     const parsed = parseProject(raw);
     this.layer.clear();
+    this.guides.clearPlanes();
+    for (const plane of parsed.planes ?? []) {
+      this.guides.addPlane({ ...plane, id: this.nextPlaneId++ });
+    }
     for (const stroke of parsed.strokes) {
       this.layer.add({ ...stroke, id: this.nextId++ });
     }
@@ -271,8 +299,10 @@ export class Engine {
       return;
     }
 
-    const start = this.hitPoint(e);
+    const start = this.hit(e, null);
     if (!start) return;
+    this.draftSurface = start.surface;
+    this.draftNormal.copy(start.normal);
 
     this.drawing = true;
     this.activePointerId = e.pointerId;
@@ -286,7 +316,7 @@ export class Engine {
       opacity: this.brush.opacity / 100,
       mirror: this.mirror,
     };
-    this.draftPoints = [toTuple(start)];
+    this.draftPoints = [toTuple(start.point)];
     this.draftPressures = [this.pressureOf(e)];
     this.draftStartTime = e.timeStamp;
     this.draftTimes = [0];
@@ -302,16 +332,17 @@ export class Engine {
     const samples = coalesced.length > 0 ? coalesced : [e];
 
     let added = false;
-    for (const sample of samples) {
-      if (this.addSample(sample)) added = true;
-    }
+        for (const sample of samples) {
+          if (this.addSample(sample)) added = true;
+        }
     if (!added) return;
     this.previewDirty = true;
   };
 
   private addSample(e: PointerEvent): boolean {
-    const point = this.hitPoint(e);
-    if (!point) return false;
+    const hit = this.hit(e, this.draftSurface);
+    if (!hit) return false;
+    const point = hit.point;
 
     const last = this.draftPoints[this.draftPoints.length - 1];
     const distance = Math.hypot(point.x - last[0], point.y - last[1], point.z - last[2]);
@@ -321,7 +352,7 @@ export class Engine {
     this.draftPressures.push(this.pressureOf(e));
     this.draftTimes.push(e.timeStamp - this.draftStartTime);
     return true;
-  }
+  };
 
   /** Mengirim ringkasan input ke indikator debug (hanya saat diaktifkan). */
   private reportInput(e: PointerEvent, force: boolean): void {
@@ -377,13 +408,26 @@ export class Engine {
         pressures: this.draftPressures,
         times: this.draftTimes,
       };
-      this.history.execute(new AddStrokeCommand(this.layer, stroke));
+      const addStroke = new AddStrokeCommand(this.layer, stroke);
+      if (this.guideDraw) {
+        this.guideDraw = false;
+        const plane = this.planeFromStroke(stroke.points);
+        if (plane) {
+          this.history.execute(new BatchCommand([addStroke, new AddGuideCommand(this.guides, plane)]));
+        } else {
+          this.history.execute(addStroke);
+        }
+        this.onGuideDrawEnd?.(plane !== null);
+      } else {
+        this.history.execute(addStroke);
+      }
     }
 
     this.draftPoints = [];
     this.draftPressures = [];
     this.draftTimes = [];
     this.draftStyle = null;
+    this.draftSurface = null;
   };
 
   private eraseAt(e: PointerEvent): void {
@@ -401,15 +445,35 @@ export class Engine {
     this.raycaster.setFromCamera(this.pointer, this.camera);
   }
 
-  private hitPoint(e: PointerEvent): THREE.Vector3 | null {
+  /** Titik tembak untuk pointer. lock = permukaan yang dikunci (null = bebas memilih). */
+  private hit(e: PointerEvent, lock: number | null): SurfaceHit | null {
     this.setRay(e);
-    // Guide aktif: hanya permukaan guide. Meleset = abaikan sampel, jangan lompat ke bidang XY.
-    if (this.guides.active) return this.guides.intersect(this.raycaster)?.point ?? null;
-    return this.raycaster.ray.intersectPlane(this.drawPlane, new THREE.Vector3());
+    if (lock !== DEFAULT_SURFACE && this.guides.active) {
+      const guide = this.guides.intersect(this.raycaster, lock);
+      if (guide) return guide;
+      // Meleset: jika terkunci atau ada bola/kubus dasar, abaikan sampel (jangan lompat ke bidang XY).
+      if (lock !== null || this.guides.hasBase) return null;
+    }
+    const point = this.raycaster.ray.intersectPlane(this.drawPlane, new THREE.Vector3());
+    if (!point) return null;
+    return { point, normal: this.drawPlane.normal.clone(), surface: DEFAULT_SURFACE };
   }
 
   private pressureOf(e: PointerEvent): number {
     return e.pressure > 0 ? e.pressure : 0.5;
+  }
+
+  /** Bidang tegak lurus permukaan gambar yang memuat garis awal->akhir goresan. Null bila tak valid. */
+  private planeFromStroke(points: Vec3Tuple[]): GuidePlaneData | null {
+    const a = new THREE.Vector3(...points[0]);
+    const b = new THREE.Vector3(...points[points.length - 1]);
+    const chord = b.clone().sub(a);
+    if (chord.length() < MIN_GUIDE_LENGTH) return null;
+    const normal = chord.normalize().cross(this.draftNormal);
+    // Garis hampir sejajar normal permukaan: bidang tak terdefinisi.
+    if (normal.length() < 0.2) return null;
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    return { id: this.nextPlaneId++, origin: toTuple(mid), normal: toTuple(normal.normalize()) };
   }
 
   

@@ -64,11 +64,20 @@ export interface HistoryInfo {
 }
 
 export const PROJECT_FORMAT = 'feather-android-prototype' as const;
-export const PROJECT_VERSION = '0.7';
+export const PROJECT_VERSION = '0.8';
+
+/** Bidang panduan buatan pengguna (Draw 3D Guide). */
+export interface GuidePlaneData {
+  id: number;
+  origin: Vec3Tuple;
+  /** Vektor satuan. */
+  normal: Vec3Tuple;
+}
 
 export interface ProjectFile {
   format: typeof PROJECT_FORMAT;
   version: string;
   guide: GuideType;
+  planes?: GuidePlaneData[];
   strokes: StrokeData[];
 }

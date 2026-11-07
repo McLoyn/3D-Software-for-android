@@ -79,7 +79,7 @@ export function BrushPanel() {
           <button
             onClick={() => {
               getEngine()?.clearStrokes();
-              showToast('Strokes cleared');
+              showToast('Strokes and guides cleared');
             }}
           >
             Clear strokes
@@ -89,7 +89,7 @@ export function BrushPanel() {
       </div>
 
       <div className="note">
-        Build 0.6 · Tablet-first prototype
+         Build 0.8 · Tablet-first prototype
         <br />
         Pressure uses Pointer Events. Stylus pressure depends on browser, device and pen support.
         This build is a web prototype, not a native APK.

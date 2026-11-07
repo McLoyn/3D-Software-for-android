@@ -14,7 +14,14 @@ export function CanvasStage() {
 
     const engine = new Engine(canvas, stage);
     engine.onChange = (info) => useUI.getState().setHistory(info);
-    engine.onInput = (info) => useUI.getState().setInput(info);
+    engine.onInput = (info) => {
+      useUI.getState().setInput(info);
+    };
+    engine.onGuideDrawEnd = (created) => {
+      const ui = useUI.getState();
+      ui.setGuideDraw(false);
+      ui.showToast(created ? 'Guide created' : 'Line too short or parallel to surface');
+    };
     setEngine(engine);
 
     // Store UI -> engine. Setter engine bersifat idempoten, jadi aman dipanggil setiap perubahan.
@@ -25,6 +32,7 @@ export function CanvasStage() {
       engine.setTouchMode(s.touchMode);
       engine.setInputDebug(s.inputDebug);
       engine.setGuide(s.guide);
+      engine.setGuideDraw(s.guideDraw);
       engine.setGridVisible(s.gridVisible);
       engine.setGuideVisible(s.guideVisible);
     };
