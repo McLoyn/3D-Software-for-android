@@ -2,14 +2,17 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   AddGuideCommand,
+  AddLayerCommand,
   AddStrokeCommand,
   BatchCommand,
+  DeleteLayerCommand,
   RemoveGuideCommand,
   RemoveStrokeCommand,
   ReplaceStrokesCommand,
 } from './commands';
 import { Guides } from './Guides';
 import { History, type Command } from './History';
+import { Layers } from './Layers';
 import { parseProject } from './project';
 import { StrokeLayer } from './StrokeLayer';
 import {
@@ -21,6 +24,7 @@ import {
   type GuideType,
   type HistoryInfo,
   type InputInfo,
+  type LayersInfo,
   type ProjectFile,
   type StrokeData,
   type ToolId,
@@ -88,6 +92,10 @@ export class Engine {
   onLasso?: (points: PxPoint[] | null) => void;
   /** Dipanggil saat Eyedropper mengambil pengaturan kuas dari sebuah goresan. */
   onBrushPicked?: (patch: Partial<BrushSettings>) => void;
+  /** Dipanggil saat daftar layer atau layer aktif berubah. */
+  onLayers?: (info: LayersInfo) => void;
+  /** Pesan singkat untuk pengguna (mis. layer terkunci). */
+  onNotice?: (text: string) => void;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly stage: HTMLElement;
@@ -103,6 +111,7 @@ export class Engine {
   private readonly grid: THREE.GridHelper;
   private readonly guides = new Guides();
   private readonly layer = new StrokeLayer();
+  private readonly layers = new Layers();
   private readonly history = new History();
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -163,6 +172,7 @@ export class Engine {
   /** Posisi pointer yang sudah dihaluskan (Stable Stroke), dalam koordinat klien. */
   private smoothX = 0;
   private smoothY = 0;
+  private activeLayer = 1;
   private readonly transformPivot = new THREE.Vector3();
   private readonly transformMatrix = new THREE.Matrix4();
 
@@ -209,6 +219,8 @@ export class Engine {
     this.scene.add(this.selectionBox);
 
     this.history.onChange = () => this.emit();
+    this.layers.onChange = () => this.syncLayers();
+    this.layers.reset([{ id: 1, name: 'Layer 1', visible: true, locked: false }]);
 
     // Fase capture di stage berjalan SEBELUM listener OrbitControls di canvas,
     // sehingga kita bisa menentukan apakah pointer ini boleh menavigasi kamera.
@@ -351,6 +363,67 @@ export class Engine {
     this.setSelection(after.map((s) => s.id));
   }
 
+  refreshLayers(): void {
+    this.onLayers?.({ layers: this.layers.all(), active: this.activeLayer });
+  }
+
+  setActiveLayer(id: number): void {
+    if (!this.layers.has(id) || id === this.activeLayer) return;
+    this.activeLayer = id;
+    this.refreshLayers();
+  }
+
+  addLayer(): void {
+    const data = this.layers.create();
+    this.history.execute(new AddLayerCommand(this.layers, data, this.layers.count));
+    this.setActiveLayer(data.id);
+  }
+
+  deleteLayer(id: number): void {
+    if (this.layers.count <= 1) {
+      this.onNotice?.('Cannot delete the last layer');
+      return;
+    }
+    const data = this.layers.get(id);
+    if (!data) return;
+    const removed = this.layer.all().filter((s) => s.layer === id);
+    this.history.execute(
+      new DeleteLayerCommand(this.layers, this.layer, { ...data }, this.layers.indexOf(id), removed),
+    );
+  }
+
+  renameLayer(id: number, name: string): void {
+    const clean = name.trim().slice(0, 40);
+    if (clean) this.layers.update(id, { name: clean });
+  }
+
+  setLayerVisible(id: number, visible: boolean): void {
+    this.layers.update(id, { visible });
+  }
+
+  setLayerLocked(id: number, locked: boolean): void {
+    this.layers.update(id, { locked });
+  }
+
+  moveLayer(id: number, delta: number): void {
+    this.layers.move(id, delta);
+  }
+
+  /** Pindahkan goresan terpilih ke layer tertentu (satu langkah undo). */
+  moveSelectionToLayer(id: number): void {
+    const target = this.layers.get(id);
+    if (!target) return;
+    if (!target.visible || target.locked) {
+      this.onNotice?.('Layer is hidden or locked');
+      return;
+    }
+    const before = this.selectedStrokes().filter((s) => s.layer !== id);
+    if (before.length === 0) return;
+    const after = before.map((s) => ({ ...s, layer: id }));
+    this.history.execute(new ReplaceStrokesCommand(this.layer, before, after));
+    this.setSelection(after.map((s) => s.id));
+  }
+
   undo(): void {
     this.history.undo();
   }
@@ -386,6 +459,7 @@ export class Engine {
       version: PROJECT_VERSION,
       guide: this.guides.type,
       planes: this.guides.allPlanes(),
+      layers: this.layers.all(),
       strokes: this.layer.all(),
     };
   }
@@ -398,11 +472,13 @@ export class Engine {
     const parsed = parseProject(raw);
     this.layer.clear();
     this.guides.clearPlanes();
+    this.layers.reset(parsed.layers);
     for (const plane of parsed.planes ?? []) {
       this.guides.addPlane({ ...plane, id: this.nextPlaneId++ });
     }
     for (const stroke of parsed.strokes) {
-      this.layer.add({ ...stroke, id: this.nextId++ });
+      const layer = this.layers.has(stroke.layer) ? stroke.layer : this.layers.firstId;
+      this.layer.add({ ...stroke, layer, id: this.nextId++ });
     }
     this.history.clear();
     this.invalidate();
@@ -429,6 +505,8 @@ export class Engine {
     this.onInput = undefined;
     this.onLasso = undefined;
     this.onBrushPicked = undefined;
+    this.onLayers = undefined;
+    this.onNotice = undefined;
   }
 
   // ------------------------------------------------------------------- input
@@ -480,6 +558,11 @@ export class Engine {
       return;
     }
 
+    const active = this.layers.get(this.activeLayer);
+    if (!active || !active.visible || active.locked) {
+      this.onNotice?.(active?.locked ? 'Layer is locked' : 'Layer is hidden');
+      return;
+    }
     const start = this.hit(e.clientX, e.clientY, null);
     if (!start) return;
     this.draftSurface = start.surface;
@@ -498,6 +581,7 @@ export class Engine {
       pressureResponse: this.brush.pressure / 100,
       opacity: this.brush.opacity / 100,
       mirror: this.mirror,
+      layer: this.activeLayer,
     };
     this.draftPoints = [toTuple(start.point)];
     this.draftPressures = [this.pressureOf(e)];
@@ -776,7 +860,7 @@ export class Engine {
   private nearestStroke(p: PxPoint): number | null {
     let best: number | null = null;
     let bestDist = TAP_PICK_RADIUS;
-    for (const s of this.layer.all()) {
+    for (const s of this.layer.interactive()) {
       for (const q of this.strokePx(s)) {
         const d = Math.hypot(q.x - p.x, q.y - p.y);
         if (d < bestDist) {
@@ -818,7 +902,7 @@ export class Engine {
   /** Lasso: tambahkan goresan yang punya minimal satu titik di dalam poligon. */
   private lassoSelect(poly: PxPoint[]): void {
     const ids = new Set(this.layer.selection);
-    for (const s of this.layer.all()) {
+    for (const s of this.layer.interactive()) {
       if (this.strokePx(s).some((q) => inPolygon(q, poly))) ids.add(s.id);
     }
     this.setSelection(ids);
@@ -999,6 +1083,19 @@ export class Engine {
     this.renderer.setSize(width, height, false);
     this.applyCameraSize();
     this.invalidate();
+  }
+
+  /** Menerapkan status layer ke goresan, memastikan layer aktif valid, lalu memberi tahu UI. */
+  private syncLayers(): void {
+    const all = this.layers.all();
+    if (!this.layers.has(this.activeLayer)) this.activeLayer = all[0].id;
+    this.layer.setLayerFlags(
+      all.filter((l) => !l.visible).map((l) => l.id),
+      all.filter((l) => l.locked).map((l) => l.id),
+    );
+    this.invalidate();
+    this.emit();
+    this.refreshLayers();
   }
 
   private emit(): void {

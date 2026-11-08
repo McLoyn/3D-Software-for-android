@@ -13,8 +13,10 @@ const TOOLS: { id: ToolId; icon: string; title: string }[] = [
 export function Toolbar() {
   const tool = useUI((s) => s.tool);
   const brush = useUI((s) => s.brush);
+  const colorOpen = useUI((s) => s.colorOpen);
   const setTool = useUI((s) => s.setTool);
   const setBrush = useUI((s) => s.setBrush);
+  const toggleColor = useUI((s) => s.toggleColor);
   const showToast = useUI((s) => s.showToast);
 
   return (
@@ -33,13 +35,12 @@ export function Toolbar() {
         </button>
       ))}
       <div className="divider" />
-      <label className="swatch" title="Color" style={{ background: brush.color }}>
-        <input
-          type="color"
-          value={brush.color}
-          onChange={(e) => setBrush({ color: e.target.value })}
-        />
-      </label>
+      <button
+        className={`swatch-btn${colorOpen ? ' active' : ''}`}
+        title="Color"
+        style={{ background: brush.color }}
+        onClick={toggleColor}
+      />
       <div className="vslider" title="Size">
         <input
           type="range"

@@ -20,6 +20,19 @@ canvas{width:100%;height:100%;display:block;touch-action:none}
 .preset button{border:0;border-radius:0;padding:6px 8px;display:flex;align-items:center;gap:6px}
 .preset .x{padding:6px;color:var(--muted)}
 .dot{width:14px;height:14px;border-radius:50%;border:1px solid var(--line);display:inline-block}
+.swatch-btn{width:34px;height:34px;padding:0;border-radius:50%;border:2px solid var(--line);flex:none}
+.swatch-btn.active{border-color:var(--accent)}
+.color-pop{left:84px;right:auto;width:236px}
+.wheel{width:200px;height:200px;display:block;margin:0 auto;touch-action:none}
+.hex{width:100%;margin-top:10px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);font:13px ui-monospace,Menlo,Consolas,monospace;-webkit-user-select:text;user-select:text}
+.recent{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.recent-dot{width:26px;height:26px;padding:0;border-radius:50%;border:2px solid var(--line)}
+.layers-sheet{top:auto;bottom:44px;left:84px;right:auto;width:min(360px,calc(100% - 96px));max-height:50%}
+.layer-list{display:flex;flex-direction:column;gap:4px}
+.layer-row{display:flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:12px;padding:2px}
+.layer-row.current{border-color:var(--accent);background:var(--accent-bg)}
+.layer-row button{padding:6px 7px;border-color:transparent;background:transparent}
+.layer-row .name{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .left-tools{top:64px;left:12px;max-height:calc(100% - 116px);overflow-y:auto}
 
 button,select{font:inherit;color:var(--text)}
@@ -65,6 +78,7 @@ select{width:100%;background:var(--panel2);border:1px solid var(--line);border-r
 @media(max-width:760px){
   .top-right{top:64px}
   .sheet{top:124px;max-height:calc(100% - 176px)}
+  .layers-sheet{top:auto}
   .brand small{display:none}
   .top-left button{padding:7px 8px}
   .debug{top:124px;left:76px}

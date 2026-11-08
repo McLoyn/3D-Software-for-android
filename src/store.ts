@@ -5,6 +5,7 @@ import {
   type GuideType,
   type HistoryInfo,
   type InputInfo,
+  type LayerData,
   type ToolId,
   type TouchMode,
   type TransformMode,
@@ -51,6 +52,11 @@ export interface UIState {
   settingsOpen: boolean;
   inputDebug: boolean;
   input: InputInfo | null;
+  layers: LayerData[];
+  activeLayer: number;
+  layersOpen: boolean;
+  colorOpen: boolean;
+  recentColors: string[];
   guide: GuideType;
   guideDraw: boolean;
   ortho: boolean;
@@ -66,6 +72,10 @@ export interface UIState {
   toggleSettings: () => void;
   setInputDebug: (on: boolean) => void;
   setInput: (info: InputInfo) => void;
+  setLayers: (layers: LayerData[], active: number) => void;
+  toggleLayers: () => void;
+  toggleColor: () => void;
+  pushRecentColor: (hex: string) => void;
   setBrush: (patch: Partial<BrushSettings>) => void;
   savePreset: () => void;
   removePreset: (index: number) => void;
@@ -92,6 +102,11 @@ export const useUI = create<UIState>((set) => ({
   settingsOpen: false,
   inputDebug: false,
   input: null,
+  layers: [],
+  activeLayer: 1,
+  layersOpen: false,
+  colorOpen: false,
+  recentColors: [],
   guide: 'plane',
   guideDraw: false,
   ortho: false,
@@ -107,6 +122,11 @@ export const useUI = create<UIState>((set) => ({
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
   setInputDebug: (inputDebug) => set({ inputDebug, input: null }),
   setInput: (input) => set({ input }),
+  setLayers: (layers, activeLayer) => set({ layers, activeLayer }),
+  toggleLayers: () => set((s) => ({ layersOpen: !s.layersOpen })),
+  toggleColor: () => set((s) => ({ colorOpen: !s.colorOpen })),
+  pushRecentColor: (hex) =>
+    set((s) => ({ recentColors: [hex, ...s.recentColors.filter((c) => c !== hex)].slice(0, 8) })),
   setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
   savePreset: () =>
     set((s) => {

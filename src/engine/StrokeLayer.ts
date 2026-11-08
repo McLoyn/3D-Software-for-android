@@ -14,6 +14,8 @@ export class StrokeLayer {
   private readonly entries = new Map<number, Entry>();
   private preview: THREE.Group | null = null;
   private readonly selected = new Set<number>();
+  private readonly hidden = new Set<number>();
+  private readonly locked = new Set<number>();
 
   get count(): number {
     return this.entries.size;
@@ -28,10 +30,35 @@ export class StrokeLayer {
     return [...this.entries.values()].map((e) => e.data).sort((a, b) => a.id - b.id);
   }
 
+  /** Goresan yang boleh disentuh pengguna: layer tidak tersembunyi dan tidak terkunci. */
+  interactive(): StrokeData[] {
+    return this.all().filter((s) => this.isInteractive(s));
+  }
+
+  /** Menerapkan status layer. Goresan di layer tersembunyi disembunyikan; seleksi yang tak lagi boleh disentuh dilepas. */
+  setLayerFlags(hidden: Iterable<number>, locked: Iterable<number>): void {
+    this.hidden.clear();
+    for (const id of hidden) this.hidden.add(id);
+    this.locked.clear();
+    for (const id of locked) this.locked.add(id);
+    for (const entry of this.entries.values()) entry.group.visible = !this.hidden.has(entry.data.layer);
+    const drop = [...this.selected].filter((id) => {
+      const entry = this.entries.get(id);
+      return !entry || !this.isInteractive(entry.data);
+    });
+    for (const id of drop) this.selected.delete(id);
+    for (const id of drop) this.tint(id);
+  }
+
+  private isInteractive(s: StrokeData): boolean {
+    return !this.hidden.has(s.layer) && !this.locked.has(s.layer);
+  }
+
   add(data: StrokeData): void {
     if (this.entries.has(data.id)) return;
     const group = buildStrokeGroup(data);
     group.userData.strokeId = data.id;
+    group.visible = !this.hidden.has(data.layer);
     this.entries.set(data.id, { data, group });
     this.root.add(group);
   }
@@ -117,9 +144,11 @@ export class StrokeLayer {
     this.preview = null;
   }
 
-  /** Mengembalikan id goresan terdepan yang tertembak ray, atau null. */
+  /** Mengembalikan id goresan terdepan yang tertembak ray (layer tersembunyi/terkunci diabaikan), atau null. */
   pick(raycaster: THREE.Raycaster): number | null {
-    const meshes = [...this.entries.values()].flatMap((e) => e.group.children);
+    const meshes = [...this.entries.values()]
+      .filter((e) => this.isInteractive(e.data))
+      .flatMap((e) => e.group.children);
     const hits = raycaster.intersectObjects(meshes, false);
     if (hits.length === 0) return null;
     const id: unknown = hits[0].object.parent?.userData.strokeId;

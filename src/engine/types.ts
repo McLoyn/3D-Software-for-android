@@ -48,8 +48,22 @@ export interface StrokeData {
   opacity: number;
   /** Apakah goresan ini dicerminkan pada sumbu X. */
   mirror: boolean;
+  /** Id layer (group) tempat goresan berada. */
+  layer: number;
   /** Waktu tiap titik dalam ms sejak titik pertama. Dipakai untuk simulasi tekanan dari kecepatan. */
   times?: number[];
+}
+/** Layer (group) goresan. Urutan hanya untuk organisasi. */
+export interface LayerData {
+  id: number;
+  name: string;
+  visible: boolean;
+  locked: boolean;
+}
+
+export interface LayersInfo {
+  layers: LayerData[];
+  active: number;
 }
 
 /** Ringkasan input terakhir, untuk indikator debug. */
@@ -70,7 +84,7 @@ export interface HistoryInfo {
 }
 
 export const PROJECT_FORMAT = 'feather-android-prototype' as const;
-export const PROJECT_VERSION = '1.1';
+export const PROJECT_VERSION = '1.2';
 
 /** Bidang panduan buatan pengguna (Draw 3D Guide). */
 export interface GuidePlaneData {
@@ -85,5 +99,6 @@ export interface ProjectFile {
   version: string;
   guide: GuideType;
   planes?: GuidePlaneData[];
+  layers?: LayerData[];
   strokes: StrokeData[];
 }

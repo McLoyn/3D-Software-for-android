@@ -1,7 +1,8 @@
 import type { Command } from './History';
 import type { Guides } from './Guides';
+import type { Layers } from './Layers';
 import type { StrokeLayer } from './StrokeLayer';
-import type { GuidePlaneData, StrokeData } from './types';
+import type { GuidePlaneData, LayerData, StrokeData } from './types';
 
 export class AddStrokeCommand implements Command {
   private readonly layer: StrokeLayer;
@@ -112,5 +113,52 @@ export class RemoveGuideCommand implements Command {
 
   undo(): void {
     this.guides.addPlane(this.plane);
+  }
+}
+
+export class AddLayerCommand implements Command {
+  private readonly layers: Layers;
+  private readonly data: LayerData;
+  private readonly index: number;
+
+  constructor(layers: Layers, data: LayerData, index: number) {
+    this.layers = layers;
+    this.data = data;
+    this.index = index;
+  }
+
+  do(): void {
+    this.layers.insert(this.data, this.index);
+  }
+
+  undo(): void {
+    this.layers.remove(this.data.id);
+  }
+}
+
+/** Menghapus layer beserta semua goresannya. Undo mengembalikan layer lalu goresannya. */
+export class DeleteLayerCommand implements Command {
+  private readonly layers: Layers;
+  private readonly strokes: StrokeLayer;
+  private readonly data: LayerData;
+  private readonly index: number;
+  private readonly removed: StrokeData[];
+
+  constructor(layers: Layers, strokes: StrokeLayer, data: LayerData, index: number, removed: StrokeData[]) {
+    this.layers = layers;
+    this.strokes = strokes;
+    this.data = data;
+    this.index = index;
+    this.removed = removed;
+  }
+
+  do(): void {
+    for (const s of this.removed) this.strokes.remove(s.id);
+    this.layers.remove(this.data.id);
+  }
+
+  undo(): void {
+    this.layers.insert(this.data, this.index);
+    for (const s of this.removed) this.strokes.add(s);
   }
 }

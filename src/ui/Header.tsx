@@ -6,6 +6,8 @@ import { useUI } from '../store';
 export function Header() {
   const canUndo = useUI((s) => s.history.canUndo);
   const canRedo = useUI((s) => s.history.canRedo);
+  const layersOpen = useUI((s) => s.layersOpen);
+  const toggleLayers = useUI((s) => s.toggleLayers);
   const showToast = useUI((s) => s.showToast);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -23,7 +25,7 @@ export function Header() {
   const onExport = () => {
     const engine = getEngine();
     if (!engine) return;
-    downloadUrl(engine.exportPNG(), 'feather-android-build-11.png');
+    downloadUrl(engine.exportPNG(), 'feather-android-build-12.png');
     showToast('PNG exported');
   };
 
@@ -45,7 +47,7 @@ export function Header() {
     <header className="pill top-left">
       <div className="brand">
         <b>✦</b>
-        <small>Android · 1.1</small>
+        <small>Android · 1.2</small>
       </div>
       <button disabled={!canUndo} onClick={() => getEngine()?.undo()} title="Undo">
         ↶
@@ -57,6 +59,9 @@ export function Header() {
       <button onClick={() => fileRef.current?.click()}>Open</button>
       <button onClick={onSave}>Save</button>
       <button onClick={onExport}>PNG</button>
+      <button className={layersOpen ? 'active' : ''} onClick={toggleLayers}>
+        Layers
+      </button>
       <input
         ref={fileRef}
         type="file"

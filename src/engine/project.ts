@@ -1,4 +1,11 @@
-import { DEFAULT_BRUSH, type GuideType, type StrokeData, type Vec3Tuple, type GuidePlaneData } from './types';
+import {
+  DEFAULT_BRUSH,
+  type GuidePlaneData,
+  type GuideType,
+  type LayerData,
+  type StrokeData,
+  type Vec3Tuple,
+} from './types';
 
 export type NewStroke = Omit<StrokeData, 'id'>;
 export type NewPlane = Omit<GuidePlaneData, 'id'>;
@@ -7,6 +14,7 @@ export interface ParsedProject {
   guide: GuideType;
   strokes: NewStroke[];
   planes: NewPlane[];
+  layers: LayerData[];
 }
 
 const GUIDES: GuideType[] = ['plane', 'sphere', 'cube'];
@@ -15,7 +23,7 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 const isVec3 = (v: unknown): v is Vec3Tuple => Array.isArray(v) && v.length === 3 && v.every(isNum);
 
 /**
- * Membaca berkas proyek (.fthr.json). Menerima format Build 0.2 sampai 0.8 (planes opsional).
+ * Membaca berkas proyek (.fthr.json). Menerima Build 0.2 sampai 1.2 (planes dan layers opsional).
  * Melempar Error bila berkas tidak valid; goresan rusak dilewati.
  */
 export function parseProject(raw: unknown): ParsedProject {
@@ -60,6 +68,7 @@ export function parseProject(raw: unknown): ParsedProject {
       pressureResponse: isNum(s.pressureResponse) ? s.pressureResponse : DEFAULT_BRUSH.pressure / 100,
       opacity: isNum(s.opacity) ? s.opacity : DEFAULT_BRUSH.opacity / 100,
       mirror: s.mirror === true,
+      layer: isNum(s.layer) ? s.layer : 0,
     });
   }
 
@@ -77,5 +86,20 @@ export function parseProject(raw: unknown): ParsedProject {
       });
     }
   }
-  return { guide, strokes, planes };
+
+  const layers: LayerData[] = [];
+  if (Array.isArray(obj.layers)) {
+    for (const item of obj.layers as unknown[]) {
+      if (typeof item !== 'object' || item === null) continue;
+      const l = item as Record<string, unknown>;
+      if (!isNum(l.id) || layers.some((x) => x.id === l.id)) continue;
+      layers.push({
+        id: l.id,
+        name: typeof l.name === 'string' ? l.name : `Layer ${l.id}`,
+        visible: l.visible !== false,
+        locked: l.locked === true,
+      });
+    }
+  }
+  return { guide, strokes, planes, layers };
 }

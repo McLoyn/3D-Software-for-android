@@ -1,4 +1,4 @@
-# Feather Android · Build 1.1
+# Feather Android · Build 1.2
 
 Klona Feather 3D untuk Android (target: PocoPad). Build 0.3 memigrasikan prototipe satu file HTML
 ke **React + TypeScript + Vite** dengan inti 3D yang terpisah dari UI. Build 0.4 menambahkan
@@ -99,16 +99,17 @@ Perilaku gambar sama. Perubahan yang ikut terjadi karena arsitektur baru:
 
 Tool Select menambah fitur tap untuk memilih goresan, lasso multi-select, serta transformasi Move/Rotate/Scale dengan preview langsung. Duplikasi, mirror, dan delete mengikuti operasi satu undo step, sementara transformasi mirroring di-bake jadi dua stroke independen.
 
-## Brush dan Warna (Build 1.1)
+## Layer dan Color Wheel (Build 1.2)
 
-- Stabilizer 0–100 di Settings menambahkan Smooth Stroke di ruang layar agar goresan tetap menempel pada guide surface tanpa merusak feel dasar.
-- Eyedropper baru di toolbar memindai stroke terdekat, menyalin warna, ukuran, opacity, dan pressure response, lalu kembali ke tool Brush.
-- Preset kuas dapat disimpan, dipanggil, dihapus, dan bertahan di localStorage sampai maksimal 8 preset.
-- Tombol Brush di Action Bar menerapkan warna, ukuran, opacity, dan tekanan saat ini ke stroke yang dipilih dalam satu undo step.
+- Panel Layers menambah layer baru, pengaktifan, rename, show/hide, lock, reorder, delete, dan pemindahan stroke terpilih antar layer.
+- Setiap goresan tersimpan di layer aktif dan layer hidden/locked memblokir drawing, selection, erasing, dan eyedropper sesuai aturan build.
+- Color wheel berdasar HSV memakai cincin hue dan kotak saturasi/brightness, dengan HEX input dan recent colors sampai 8 item.
+- Semua status layer disimpan ke proyek dan dibuka kembali dengan kompatibilitas file 0.x–1.1 serta fallback otomatis ke Layer 1.
 
 ## Yang belum dikerjakan
 
-- Gizmo/joystick sumbu untuk transformasi, Group, ekspor GLTF/OBJ.
+- Opasitas per layer, merge layer, mirror sumbu Y/Z, ekspor GLTF/OBJ.
+- Gizmo/joystick sumbu untuk transformasi.
 - Bayangan jatuh dan permukaan terisi (fill) seperti di Feather asli.
 - Eraser belum menghapus saat digeser, hanya saat diketuk.
 - Bungkus jadi APK dengan Capacitor.

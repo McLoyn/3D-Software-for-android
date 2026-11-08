@@ -32,6 +32,9 @@ export function CanvasStage() {
       ui.setTool('draw');
       ui.showToast('Brush picked');
     };
+    engine.onLayers = (info) => useUI.getState().setLayers(info.layers, info.active);
+    engine.onNotice = (text) => useUI.getState().showToast(text);
+    engine.refreshLayers();
     setEngine(engine);
 
     // Store UI -> engine. Setter engine bersifat idempoten, jadi aman dipanggil setiap perubahan.
