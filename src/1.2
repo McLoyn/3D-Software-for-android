@@ -1,0 +1,818 @@
+# TASK: Implement Build 1.2 "Layer dan Color Wheel" in repo feather-android (React + TS + Vite + Three.js)
+
+## RULES (read first)
+- Apply ONLY the changes below. Do NOT refactor, rename, reformat, or touch anything not listed.
+- Keep existing code comments (Indonesian) and style (2 spaces, single quotes, semicolons).
+- Do the steps IN ORDER. After step 9 run `npm run typecheck` and fix only errors caused by these edits.
+- "FIND/REPLACE" = exact text anchor. "ADD" = insert at the stated place. "CREATE" = new file with the given content.
+- Do not add dependencies. `tsconfig` is strict with noUnusedLocals/noUnusedParameters: no unused imports or variables.
+- Baseline is Build 1.1. NAMING WARNING: in `Engine.ts`, `this.layer` is the existing `StrokeLayer` (strokes). The new layer
+  manager is `this.layers` (class `Layers`). Do not confuse them.
+
+## FEATURES (context)
+Feather's "Group" = a drawing layer. This build adds layers (groups) + a professional HSV color wheel.
+A. Layers panel (header button "Layers"): new layer, set active (tap name), rename (✎), show/hide (👁), lock (🔒),
+   reorder (↑↓, organizational only: 3D strokes still render by depth), delete (✕), move selected strokes to a layer (⇥).
+   - New strokes go to the ACTIVE layer. Drawing on a hidden/locked active layer is blocked with a toast.
+   - Hidden layers: strokes not rendered. Hidden OR locked layers: strokes cannot be selected, erased, or picked.
+   - Undoable: add layer, delete layer (with its strokes), move selection to layer. Not undoable: rename, show/hide, lock, reorder.
+   - Always at least 1 layer. Layers are saved in the project file (`layers`, and `layer` on each stroke).
+B. Color wheel popover (toolbar color button): hue ring + saturation/brightness square (canvas), HEX field, recent colors (max 8).
+
+---
+
+## STEP 1 — `src/engine/types.ts`
+1a. In `interface StrokeData` add field after `mirror: boolean;`:
+```ts
+  /** Id layer (group) tempat goresan berada. */
+  layer: number;
+```
+1b. ADD (above `export interface ProjectFile`):
+```ts
+/** Layer (group) goresan. Urutan hanya untuk organisasi. */
+export interface LayerData {
+  id: number;
+  name: string;
+  visible: boolean;
+  locked: boolean;
+}
+
+export interface LayersInfo {
+  layers: LayerData[];
+  active: number;
+}
+```
+1c. In `interface ProjectFile` add after `planes?: GuidePlaneData[];`:
+```ts
+  layers?: LayerData[];
+```
+1d. FIND: `export const PROJECT_VERSION = '1.1';` REPLACE: `export const PROJECT_VERSION = '1.2';`
+
+## STEP 2 — CREATE `src/engine/Layers.ts`
+```ts
+import type { LayerData } from './types';
+
+/** Daftar layer (group) proyek. Selalu berisi minimal satu layer setelah reset(). */
+export class Layers {
+  onChange?: () => void;
+
+  private list: LayerData[] = [];
+  private nextId = 1;
+
+  get count(): number {
+    return this.list.length;
+  }
+
+  get firstId(): number {
+    return this.list[0].id;
+  }
+
+  all(): LayerData[] {
+    return this.list.map((l) => ({ ...l }));
+  }
+
+  get(id: number): LayerData | undefined {
+    return this.list.find((l) => l.id === id);
+  }
+
+  has(id: number): boolean {
+    return this.list.some((l) => l.id === id);
+  }
+
+  indexOf(id: number): number {
+    return this.list.findIndex((l) => l.id === id);
+  }
+
+  /** Membuat data layer baru (id otomatis) tanpa memasukkannya ke daftar. */
+  create(): LayerData {
+    const id = this.nextId++;
+    return { id, name: `Layer ${id}`, visible: true, locked: false };
+  }
+
+  insert(data: LayerData, index: number): void {
+    if (this.has(data.id)) return;
+    const i = Math.min(Math.max(index, 0), this.list.length);
+    this.list.splice(i, 0, { ...data });
+    this.nextId = Math.max(this.nextId, data.id + 1);
+    this.onChange?.();
+  }
+
+  remove(id: number): void {
+    const i = this.indexOf(id);
+    if (i < 0) return;
+    this.list.splice(i, 1);
+    this.onChange?.();
+  }
+
+  update(id: number, patch: Partial<Pick<LayerData, 'name' | 'visible' | 'locked'>>): void {
+    const layer = this.get(id);
+    if (!layer) return;
+    Object.assign(layer, patch);
+    this.onChange?.();
+  }
+
+  /** delta = +1 naik (ke arah akhir daftar), -1 turun. */
+  move(id: number, delta: number): void {
+    const i = this.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= this.list.length) return;
+    const [item] = this.list.splice(i, 1);
+    this.list.splice(j, 0, item);
+    this.onChange?.();
+  }
+
+  /** Mengganti seluruh daftar. Bila kosong dibuat satu layer bawaan. */
+  reset(list: LayerData[]): void {
+    this.list = list.map((l) => ({ ...l }));
+    if (this.list.length === 0) this.list.push({ id: 1, name: 'Layer 1', visible: true, locked: false });
+    this.nextId = Math.max(...this.list.map((l) => l.id)) + 1;
+    this.onChange?.();
+  }
+}
+```
+
+## STEP 3 — `src/engine/StrokeLayer.ts`
+3a. ADD fields below `private readonly selected = new Set<number>();`:
+```ts
+  private readonly hidden = new Set<number>();
+  private readonly locked = new Set<number>();
+```
+3b. In `add(data)`, right after the line `group.userData.strokeId = data.id;` ADD:
+```ts
+    group.visible = !this.hidden.has(data.layer);
+```
+3c. REPLACE the whole `pick` method with:
+```ts
+  /** Mengembalikan id goresan terdepan yang tertembak ray (layer tersembunyi/terkunci diabaikan), atau null. */
+  pick(raycaster: THREE.Raycaster): number | null {
+    const meshes = [...this.entries.values()]
+      .filter((e) => this.isInteractive(e.data))
+      .flatMap((e) => e.group.children);
+    const hits = raycaster.intersectObjects(meshes, false);
+    if (hits.length === 0) return null;
+    const id: unknown = hits[0].object.parent?.userData.strokeId;
+    return typeof id === 'number' ? id : null;
+  }
+```
+3d. ADD these members inside the class (below `all()`):
+```ts
+  /** Goresan yang boleh disentuh pengguna: layer tidak tersembunyi dan tidak terkunci. */
+  interactive(): StrokeData[] {
+    return this.all().filter((s) => this.isInteractive(s));
+  }
+
+  /** Menerapkan status layer. Goresan di layer tersembunyi disembunyikan; seleksi yang tak lagi boleh disentuh dilepas. */
+  setLayerFlags(hidden: Iterable<number>, locked: Iterable<number>): void {
+    this.hidden.clear();
+    for (const id of hidden) this.hidden.add(id);
+    this.locked.clear();
+    for (const id of locked) this.locked.add(id);
+    for (const entry of this.entries.values()) entry.group.visible = !this.hidden.has(entry.data.layer);
+    const drop = [...this.selected].filter((id) => {
+      const entry = this.entries.get(id);
+      return !entry || !this.isInteractive(entry.data);
+    });
+    for (const id of drop) this.selected.delete(id);
+    for (const id of drop) this.tint(id);
+  }
+
+  private isInteractive(s: StrokeData): boolean {
+    return !this.hidden.has(s.layer) && !this.locked.has(s.layer);
+  }
+```
+
+## STEP 4 — `src/engine/commands.ts`
+4a. Imports: add `import type { Layers } from './Layers';` and add `LayerData` to the './types' import list (it becomes `GuidePlaneData, LayerData, StrokeData`).
+4b. APPEND at end of file:
+```ts
+export class AddLayerCommand implements Command {
+  private readonly layers: Layers;
+  private readonly data: LayerData;
+  private readonly index: number;
+
+  constructor(layers: Layers, data: LayerData, index: number) {
+    this.layers = layers;
+    this.data = data;
+    this.index = index;
+  }
+
+  do(): void {
+    this.layers.insert(this.data, this.index);
+  }
+
+  undo(): void {
+    this.layers.remove(this.data.id);
+  }
+}
+
+/** Menghapus layer beserta semua goresannya. Undo mengembalikan layer lalu goresannya. */
+export class DeleteLayerCommand implements Command {
+  private readonly layers: Layers;
+  private readonly strokes: StrokeLayer;
+  private readonly data: LayerData;
+  private readonly index: number;
+  private readonly removed: StrokeData[];
+
+  constructor(layers: Layers, strokes: StrokeLayer, data: LayerData, index: number, removed: StrokeData[]) {
+    this.layers = layers;
+    this.strokes = strokes;
+    this.data = data;
+    this.index = index;
+    this.removed = removed;
+  }
+
+  do(): void {
+    for (const s of this.removed) this.strokes.remove(s.id);
+    this.layers.remove(this.data.id);
+  }
+
+  undo(): void {
+    this.layers.insert(this.data, this.index);
+    for (const s of this.removed) this.strokes.add(s);
+  }
+}
+```
+
+## STEP 5 — `src/engine/project.ts`
+- Add `type LayerData` to the import from './types'.
+- In `ParsedProject` add: `layers: LayerData[];`
+- In the stroke `strokes.push({ ... })` object add `layer: isNum(s.layer) ? s.layer : 0,` (after `mirror: s.mirror === true,`).
+- After the `planes` block and before `return`, ADD:
+```ts
+  const layers: LayerData[] = [];
+  if (Array.isArray(obj.layers)) {
+    for (const item of obj.layers as unknown[]) {
+      if (typeof item !== 'object' || item === null) continue;
+      const l = item as Record<string, unknown>;
+      if (!isNum(l.id) || layers.some((x) => x.id === l.id)) continue;
+      layers.push({
+        id: l.id,
+        name: typeof l.name === 'string' ? l.name : `Layer ${l.id}`,
+        visible: l.visible !== false,
+        locked: l.locked === true,
+      });
+    }
+  }
+```
+- Change the final line to `return { guide, strokes, planes, layers };`
+- Update the doc comment: "menerima Build 0.2 sampai 1.2 (planes dan layers opsional)".
+
+## STEP 6 — `src/engine/Engine.ts`
+6a. Imports. In the './commands' import list add `AddLayerCommand,` (first) and `DeleteLayerCommand,` (after `BatchCommand,`).
+Add `import { Layers } from './Layers';` (after the `History` import line).
+In the './types' import list add `type LayersInfo,` (after `type InputInfo,`).
+
+6b. Callback fields, below `onBrushPicked?`:
+```ts
+  /** Dipanggil saat daftar layer atau layer aktif berubah. */
+  onLayers?: (info: LayersInfo) => void;
+  /** Pesan singkat untuk pengguna (mis. layer terkunci). */
+  onNotice?: (text: string) => void;
+```
+
+6c. Fields. FIND `private readonly layer = new StrokeLayer();` and ADD directly below it:
+```ts
+  private readonly layers = new Layers();
+```
+ADD with the other state fields (e.g. below `private smoothY = 0;`):
+```ts
+  private activeLayer = 1;
+```
+
+6d. Constructor. FIND `this.history.onChange = () => this.emit();` and ADD directly below:
+```ts
+    this.layers.onChange = () => this.syncLayers();
+    this.layers.reset([{ id: 1, name: 'Layer 1', visible: true, locked: false }]);
+```
+
+6e. `onPointerDown`: FIND `mirror: this.mirror,` (inside `this.draftStyle = { ... }`) REPLACE:
+```ts
+      mirror: this.mirror,
+      layer: this.activeLayer,
+```
+FIND `const start = this.hit(e.clientX, e.clientY, null);` REPLACE:
+```ts
+    const active = this.layers.get(this.activeLayer);
+    if (!active || !active.visible || active.locked) {
+      this.onNotice?.(active?.locked ? 'Layer is locked' : 'Layer is hidden');
+      return;
+    }
+    const start = this.hit(e.clientX, e.clientY, null);
+```
+
+6f. Interaction filters. In BOTH `nearestStroke` and `lassoSelect`, replace `this.layer.all()` with `this.layer.interactive()`.
+(Do NOT change other `this.layer.all()` usages, e.g. in `serialize` and the new `deleteLayer`.)
+
+6g. `serialize()`: add `layers: this.layers.all(),` after `planes: this.guides.allPlanes(),`.
+
+6h. `loadProject()`: FIND `this.layer.add({ ...stroke, id: this.nextId++ });` REPLACE:
+```ts
+      const layer = this.layers.has(stroke.layer) ? stroke.layer : this.layers.firstId;
+      this.layer.add({ ...stroke, layer, id: this.nextId++ });
+```
+and ADD right BEFORE the `for (const stroke of parsed.strokes) {` loop:
+```ts
+    this.layers.reset(parsed.layers);
+```
+
+6i. Actions. ADD after `applyBrushToSelection()`:
+```ts
+  refreshLayers(): void {
+    this.onLayers?.({ layers: this.layers.all(), active: this.activeLayer });
+  }
+
+  setActiveLayer(id: number): void {
+    if (!this.layers.has(id) || id === this.activeLayer) return;
+    this.activeLayer = id;
+    this.refreshLayers();
+  }
+
+  addLayer(): void {
+    const data = this.layers.create();
+    this.history.execute(new AddLayerCommand(this.layers, data, this.layers.count));
+    this.setActiveLayer(data.id);
+  }
+
+  deleteLayer(id: number): void {
+    if (this.layers.count <= 1) {
+      this.onNotice?.('Cannot delete the last layer');
+      return;
+    }
+    const data = this.layers.get(id);
+    if (!data) return;
+    const removed = this.layer.all().filter((s) => s.layer === id);
+    this.history.execute(
+      new DeleteLayerCommand(this.layers, this.layer, { ...data }, this.layers.indexOf(id), removed),
+    );
+  }
+
+  renameLayer(id: number, name: string): void {
+    const clean = name.trim().slice(0, 40);
+    if (clean) this.layers.update(id, { name: clean });
+  }
+
+  setLayerVisible(id: number, visible: boolean): void {
+    this.layers.update(id, { visible });
+  }
+
+  setLayerLocked(id: number, locked: boolean): void {
+    this.layers.update(id, { locked });
+  }
+
+  moveLayer(id: number, delta: number): void {
+    this.layers.move(id, delta);
+  }
+
+  /** Pindahkan goresan terpilih ke layer tertentu (satu langkah undo). */
+  moveSelectionToLayer(id: number): void {
+    const target = this.layers.get(id);
+    if (!target) return;
+    if (!target.visible || target.locked) {
+      this.onNotice?.('Layer is hidden or locked');
+      return;
+    }
+    const before = this.selectedStrokes().filter((s) => s.layer !== id);
+    if (before.length === 0) return;
+    const after = before.map((s) => ({ ...s, layer: id }));
+    this.history.execute(new ReplaceStrokesCommand(this.layer, before, after));
+    this.setSelection(after.map((s) => s.id));
+  }
+```
+
+6j. `internals`: ADD (above `emit()`):
+```ts
+  /** Menerapkan status layer ke goresan, memastikan layer aktif valid, lalu memberi tahu UI. */
+  private syncLayers(): void {
+    const all = this.layers.all();
+    if (!this.layers.has(this.activeLayer)) this.activeLayer = all[0].id;
+    this.layer.setLayerFlags(
+      all.filter((l) => !l.visible).map((l) => l.id),
+      all.filter((l) => l.locked).map((l) => l.id),
+    );
+    this.invalidate();
+    this.emit();
+    this.refreshLayers();
+  }
+```
+6k. `dispose()`: next to `this.onBrushPicked = undefined;` add:
+```ts
+    this.onLayers = undefined;
+    this.onNotice = undefined;
+```
+
+## STEP 7 — `src/store.ts`
+- Import: add `type LayerData,` to the './engine/types' import list.
+- `interface UIState`: add state
+```ts
+  layers: LayerData[];
+  activeLayer: number;
+  layersOpen: boolean;
+  colorOpen: boolean;
+  recentColors: string[];
+```
+  (after `input: InputInfo | null;`) and actions
+```ts
+  setLayers: (layers: LayerData[], active: number) => void;
+  toggleLayers: () => void;
+  toggleColor: () => void;
+  pushRecentColor: (hex: string) => void;
+```
+  (after `setInput`).
+- Initial values (after `input: null,`): `layers: [],` `activeLayer: 1,` `layersOpen: false,` `colorOpen: false,` `recentColors: [],`
+- Actions (after `setInput`):
+```ts
+  setLayers: (layers, activeLayer) => set({ layers, activeLayer }),
+  toggleLayers: () => set((s) => ({ layersOpen: !s.layersOpen })),
+  toggleColor: () => set((s) => ({ colorOpen: !s.colorOpen })),
+  pushRecentColor: (hex) =>
+    set((s) => ({ recentColors: [hex, ...s.recentColors.filter((c) => c !== hex)].slice(0, 8) })),
+```
+
+## STEP 8 — UI
+8a. `src/ui/CanvasStage.tsx`: after the `engine.onBrushPicked = ...` block ADD:
+```ts
+    engine.onLayers = (info) => useUI.getState().setLayers(info.layers, info.active);
+    engine.onNotice = (text) => useUI.getState().showToast(text);
+    engine.refreshLayers();
+```
+8b. `src/ui/Toolbar.tsx`:
+- Add selectors: `const colorOpen = useUI((s) => s.colorOpen);` and `const toggleColor = useUI((s) => s.toggleColor);`
+- REPLACE the whole `<label className="swatch" ...> ... </label>` block with:
+```tsx
+      <button
+        className={`swatch-btn${colorOpen ? ' active' : ''}`}
+        title="Color"
+        style={{ background: brush.color }}
+        onClick={toggleColor}
+      />
+```
+8c. CREATE `src/ui/ColorWheel.tsx`:
+```tsx
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+
+interface Hsv {
+  h: number;
+  s: number;
+  v: number;
+}
+
+const SIZE = 200;
+const C = SIZE / 2;
+const RING_OUT = 96;
+const RING_IN = 76;
+/** Setengah sisi persegi saturasi/kecerahan di tengah cincin. */
+const HALF = 50;
+
+const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
+
+export function hsvToHex({ h, s, v }: Hsv): string {
+  const f = (n: number): number => {
+    const k = (n + h / 60) % 6;
+    return v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+  };
+  const to = (x: number): string =>
+    Math.round(x * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${to(f(5))}${to(f(3))}${to(f(1))}`;
+}
+
+export function hexToHsv(hex: string, fallbackHue = 0): Hsv {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return { h: fallbackHue, s: 0, v: 0 };
+  const n = parseInt(m[1], 16);
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  let h = fallbackHue;
+  if (d > 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h, s: max === 0 ? 0 : d / max, v: max };
+}
+
+interface Props {
+  value: string;
+  onChange: (hex: string) => void;
+  /** Dipanggil saat pemilihan warna selesai (untuk riwayat warna). */
+  onCommit: (hex: string) => void;
+}
+
+/** Color wheel HSV: cincin hue, persegi saturasi/kecerahan, dan kolom HEX. */
+export function ColorWheel({ value, onChange, onCommit }: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drag = useRef<'ring' | 'box' | null>(null);
+  const [hsv, setHsv] = useState<Hsv>(() => hexToHsv(value));
+  const [text, setText] = useState(value);
+
+  // Sinkronkan dari luar (mis. Eyedropper) tanpa menghilangkan hue saat warna abu-abu.
+  useEffect(() => {
+    setHsv((prev) => (hsvToHex(prev) === value.toLowerCase() ? prev : hexToHsv(value, prev.h)));
+    setText(value);
+  }, [value]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = SIZE * dpr;
+    canvas.height = SIZE * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, SIZE, SIZE);
+
+    const ring = ctx.createConicGradient(0, C, C);
+    ['#f00', '#ff0', '#0f0', '#0ff', '#00f', '#f0f', '#f00'].forEach((color, i) =>
+      ring.addColorStop(i / 6, color),
+    );
+    ctx.lineWidth = RING_OUT - RING_IN;
+    ctx.strokeStyle = ring;
+    ctx.beginPath();
+    ctx.arc(C, C, (RING_OUT + RING_IN) / 2, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const x0 = C - HALF;
+    const y0 = C - HALF;
+    const side = HALF * 2;
+    ctx.fillStyle = `hsl(${hsv.h}, 100%, 50%)`;
+    ctx.fillRect(x0, y0, side, side);
+    const white = ctx.createLinearGradient(x0, 0, x0 + side, 0);
+    white.addColorStop(0, '#fff');
+    white.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = white;
+    ctx.fillRect(x0, y0, side, side);
+    const black = ctx.createLinearGradient(0, y0, 0, y0 + side);
+    black.addColorStop(0, 'rgba(0,0,0,0)');
+    black.addColorStop(1, '#000');
+    ctx.fillStyle = black;
+    ctx.fillRect(x0, y0, side, side);
+
+    const mark = (x: number, y: number): void => {
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(0,0,0,.5)';
+      ctx.beginPath();
+      ctx.arc(x, y, 7.5, 0, Math.PI * 2);
+      ctx.stroke();
+    };
+    const a = (hsv.h * Math.PI) / 180;
+    const rm = (RING_OUT + RING_IN) / 2;
+    mark(C + Math.cos(a) * rm, C + Math.sin(a) * rm);
+    mark(x0 + hsv.s * side, y0 + (1 - hsv.v) * side);
+  }, [hsv]);
+
+  const local = (e: ReactPointerEvent<HTMLCanvasElement>): { x: number; y: number } => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * SIZE,
+      y: ((e.clientY - rect.top) / rect.height) * SIZE,
+    };
+  };
+
+  const apply = (e: ReactPointerEvent<HTMLCanvasElement>, mode: 'ring' | 'box'): void => {
+    const { x, y } = local(e);
+    let next: Hsv;
+    if (mode === 'ring') {
+      let h = (Math.atan2(y - C, x - C) * 180) / Math.PI;
+      if (h < 0) h += 360;
+      next = { ...hsv, h };
+    } else {
+      next = {
+        ...hsv,
+        s: clamp01((x - (C - HALF)) / (HALF * 2)),
+        v: 1 - clamp01((y - (C - HALF)) / (HALF * 2)),
+      };
+    }
+    setHsv(next);
+    onChange(hsvToHex(next));
+  };
+
+  const onDown = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
+    const { x, y } = local(e);
+    const dist = Math.hypot(x - C, y - C);
+    if (dist >= RING_IN - 4 && dist <= RING_OUT + 6) drag.current = 'ring';
+    else if (Math.abs(x - C) <= HALF + 6 && Math.abs(y - C) <= HALF + 6) drag.current = 'box';
+    else return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    apply(e, drag.current);
+  };
+
+  const onMove = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
+    if (drag.current) apply(e, drag.current);
+  };
+
+  const onUp = (): void => {
+    if (!drag.current) return;
+    drag.current = null;
+    onCommit(hsvToHex(hsv));
+  };
+
+  return (
+    <div>
+      <canvas
+        ref={canvasRef}
+        className="wheel"
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+      />
+      <input
+        className="hex"
+        value={text}
+        maxLength={7}
+        spellCheck={false}
+        onChange={(e) => {
+          const t = e.target.value;
+          setText(t);
+          if (/^#[0-9a-f]{6}$/i.test(t)) {
+            const hex = t.toLowerCase();
+            setHsv(hexToHsv(hex, hsv.h));
+            onChange(hex);
+            onCommit(hex);
+          }
+        }}
+      />
+    </div>
+  );
+}
+```
+8d. CREATE `src/ui/ColorPanel.tsx`:
+```tsx
+import { useUI } from '../store';
+import { ColorWheel } from './ColorWheel';
+
+/** Popover color wheel dari tombol warna di toolbar. */
+export function ColorPanel() {
+  const open = useUI((s) => s.colorOpen);
+  const color = useUI((s) => s.brush.color);
+  const recent = useUI((s) => s.recentColors);
+  const setBrush = useUI((s) => s.setBrush);
+  const pushRecent = useUI((s) => s.pushRecentColor);
+  const toggleColor = useUI((s) => s.toggleColor);
+
+  if (!open) return null;
+
+  return (
+    <aside className="sheet color-pop">
+      <div className="sheet-head">
+        <span>Color</span>
+        <button onClick={toggleColor} title="Close">
+          ✕
+        </button>
+      </div>
+      <ColorWheel value={color} onChange={(hex) => setBrush({ color: hex })} onCommit={pushRecent} />
+      <div className="recent">
+        {recent.map((c) => (
+          <button
+            key={c}
+            className="recent-dot"
+            style={{ background: c }}
+            title={c}
+            onClick={() => setBrush({ color: c })}
+          />
+        ))}
+      </div>
+    </aside>
+  );
+}
+```
+8e. CREATE `src/ui/LayersPanel.tsx`:
+```tsx
+import { getEngine } from '../engineRef';
+import { useUI } from '../store';
+
+/** Panel layer (group): aktif, tampil/sembunyi, kunci, urutan, ganti nama, hapus, pindahkan seleksi. */
+export function LayersPanel() {
+  const open = useUI((s) => s.layersOpen);
+  const layers = useUI((s) => s.layers);
+  const active = useUI((s) => s.activeLayer);
+  const hasSelection = useUI((s) => s.history.selectionCount > 0);
+  const toggleLayers = useUI((s) => s.toggleLayers);
+
+  if (!open) return null;
+
+  return (
+    <aside className="sheet layers-sheet">
+      <div className="sheet-head">
+        <span>Layers</span>
+        <span>
+          <button title="New layer" onClick={() => getEngine()?.addLayer()}>
+            ＋
+          </button>
+          <button onClick={toggleLayers} title="Close">
+            ✕
+          </button>
+        </span>
+      </div>
+      <div className="layer-list">
+        {[...layers].reverse().map((l) => (
+          <div key={l.id} className={`layer-row${l.id === active ? ' current' : ''}`}>
+            <button
+              title={l.visible ? 'Hide' : 'Show'}
+              onClick={() => getEngine()?.setLayerVisible(l.id, !l.visible)}
+            >
+              {l.visible ? '👁' : '◌'}
+            </button>
+            <button
+              title={l.locked ? 'Unlock' : 'Lock'}
+              onClick={() => getEngine()?.setLayerLocked(l.id, !l.locked)}
+            >
+              {l.locked ? '🔒' : '🔓'}
+            </button>
+            <button className="name" title="Set active layer" onClick={() => getEngine()?.setActiveLayer(l.id)}>
+              {l.name}
+            </button>
+            <button
+              title="Rename"
+              onClick={() => {
+                const name = window.prompt('Layer name', l.name);
+                if (name !== null) getEngine()?.renameLayer(l.id, name);
+              }}
+            >
+              ✎
+            </button>
+            <button title="Move up" onClick={() => getEngine()?.moveLayer(l.id, 1)}>
+              ↑
+            </button>
+            <button title="Move down" onClick={() => getEngine()?.moveLayer(l.id, -1)}>
+              ↓
+            </button>
+            <button
+              title="Move selection to this layer"
+              disabled={!hasSelection}
+              onClick={() => getEngine()?.moveSelectionToLayer(l.id)}
+            >
+              ⇥
+            </button>
+            <button title="Delete layer" onClick={() => getEngine()?.deleteLayer(l.id)}>
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+    </aside>
+  );
+}
+```
+8f. `src/ui/Header.tsx`: add `const layersOpen = useUI((s) => s.layersOpen);` and `const toggleLayers = useUI((s) => s.toggleLayers);` with the other selectors. In the JSX, right after the `PNG` button ADD:
+```tsx
+      <button className={layersOpen ? 'active' : ''} onClick={toggleLayers}>
+        Layers
+      </button>
+```
+8g. `src/App.tsx`: add imports `import { ColorPanel } from './ui/ColorPanel';` and `import { LayersPanel } from './ui/LayersPanel';` (alphabetical with existing). Render `<ColorPanel />` and `<LayersPanel />` right after `<ActionBar />`.
+8h. `src/styles.css`: ADD right after the `.dot{...}` rule (before the `@media` block):
+```css
+.swatch-btn{width:34px;height:34px;padding:0;border-radius:50%;border:2px solid var(--line);flex:none}
+.swatch-btn.active{border-color:var(--accent)}
+.color-pop{left:84px;right:auto;width:236px}
+.wheel{width:200px;height:200px;display:block;margin:0 auto;touch-action:none}
+.hex{width:100%;margin-top:10px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);font:13px ui-monospace,Menlo,Consolas,monospace;-webkit-user-select:text;user-select:text}
+.recent{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.recent-dot{width:26px;height:26px;padding:0;border-radius:50%;border:2px solid var(--line)}
+.layers-sheet{top:auto;bottom:44px;left:84px;right:auto;width:min(360px,calc(100% - 96px));max-height:50%}
+.layer-list{display:flex;flex-direction:column;gap:4px}
+.layer-row{display:flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:12px;padding:2px}
+.layer-row.current{border-color:var(--accent);background:var(--accent-bg)}
+.layer-row button{padding:6px 7px;border-color:transparent;background:transparent}
+.layer-row .name{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+```
+Inside the existing `@media(max-width:760px){ ... }` block ADD one line: `.layers-sheet{top:auto}`
+
+## STEP 9 — Version strings (Build 1.2) and README
+- `package.json`: `"version": "1.2.0"`
+- `index.html`: `<title>Feather Android · Build 1.2</title>`
+- `src/ui/Header.tsx`: `Android · 1.2` and `feather-android-build-12.png`
+- `src/ui/BrushPanel.tsx`: `Build 1.2 · Tablet-first prototype`
+- `README.md`: first line `# Feather Android · Build 1.2`; add a section "## Layer dan Color Wheel (Build 1.2)" summarizing features A-B (4-6 lines); in "Yang belum dikerjakan" remove "palet warna" if present and add: "Opasitas per layer, merge layer, mirror sumbu Y/Z, ekspor GLTF/OBJ."
+
+Then run `npm run typecheck`.
+
+---
+
+## ACCEPTANCE TESTS (manual, on tablet)
+1. Header "Layers" opens the panel with "Layer 1" highlighted as active. ＋ adds "Layer 2" at the top and makes it active.
+2. Draw on Layer 2, tap Layer 1, draw again. Hide Layer 2 (👁): its strokes disappear; Show brings them back.
+3. Lock Layer 1: drawing on it shows toast "Layer is locked"; its strokes can't be erased, selected, or picked with the eyedropper. Unlock restores this.
+4. Select strokes (Select tool) -> in the panel tap ⇥ on another layer: strokes move (one Undo moves them back). Hidden/locked target shows a toast.
+5. Hiding or locking a layer drops its strokes from the current selection.
+6. Rename (✎) updates the name. ↑/↓ reorders rows (drawing result unchanged).
+7. Delete a layer with strokes: strokes vanish; Undo restores the layer AND its strokes. Deleting the last layer shows "Cannot delete the last layer".
+8. Add layer then Undo: the layer disappears and the active layer falls back to an existing one.
+9. Save, Clear strokes, Open: layers (names, hidden, locked) and stroke assignment are restored. Old 0.x-1.1 files load with all strokes on "Layer 1".
+10. Color wheel: tap the toolbar color circle -> popover. Drag on the ring changes hue, drag in the square changes saturation/brightness; the toolbar circle and next stroke use the color. Typing a valid #rrggbb in the HEX box updates the wheel. Finished picks appear as recent dots (max 8, newest first).
+11. Eyedropper a stroke while the popover is open: the wheel jumps to that color; picking a gray/black keeps the previous hue.
+
+## NOT IN SCOPE
+Per-layer opacity, merge layers, layer thumbnails, blend modes, RGB/HSL sliders, persisting recent colors, mirror Y/Z, export.
